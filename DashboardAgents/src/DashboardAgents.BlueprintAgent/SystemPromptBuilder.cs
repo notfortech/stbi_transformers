@@ -21,6 +21,10 @@ public static class SystemPromptBuilder
             _ => "30/06"
         };
 
+        var knowledgePackLine = string.IsNullOrWhiteSpace(options.KnowledgePack)
+            ? ""
+            : $"\nDomain knowledge pack: {options.KnowledgePack}";
+
         var runtimeContext = $"""
             RUN-TIME CONTEXT FOR THIS GENERATION
             =====================================
@@ -29,7 +33,7 @@ public static class SystemPromptBuilder
             Currency: {options.Currency}
             Fiscal year starts: {options.FiscalYearStart} (fiscal year end: {fyEnd})
             RLS required: {options.RlsRequired}
-            Refresh cadence: {options.RefreshCadence}
+            Refresh cadence: {options.RefreshCadence}{knowledgePackLine}
 
             You must produce your ENTIRE response as a single valid JSON object conforming exactly
             to the schema in DashboardBlueprintSchema.md below. Do not include markdown code fences,

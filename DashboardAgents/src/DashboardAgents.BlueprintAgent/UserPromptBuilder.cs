@@ -7,9 +7,13 @@ public static class UserPromptBuilder
 {
     public static string Build(BlueprintGenerationOptions options)
     {
+        var goalBlock = !string.IsNullOrWhiteSpace(options.Requirements) && options.Mode == "schema"
+            ? $"BUSINESS GOAL:\n{options.Requirements}\n\n"
+            : "";
+
         var inputBlock = options.Mode == "requirements"
             ? $"BUSINESS REQUIREMENTS:\n{options.Requirements ?? "(none provided)"}"
-            : $"DATASET SCHEMA / HEADERS:\n{options.SchemaText ?? "(none provided)"}";
+            : $"{goalBlock}DATASET SCHEMA / HEADERS:\n{options.SchemaText ?? "(none provided)"}";
 
         return $"""
             {inputBlock}
