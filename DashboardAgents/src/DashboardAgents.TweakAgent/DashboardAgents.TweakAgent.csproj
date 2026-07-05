@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DashboardAgents.TweakAgent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DashboardAgents.Core\DashboardAgents.Core.csproj" />
+    <ProjectReference Include="..\DashboardAgents.Llm\DashboardAgents.Llm.csproj" />
+    <ProjectReference Include="..\DashboardAgents.BlueprintAgent\DashboardAgents.BlueprintAgent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Prompts\*.md" />
+  </ItemGroup>
+
+</Project>

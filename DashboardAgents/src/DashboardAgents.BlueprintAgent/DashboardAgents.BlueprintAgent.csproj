@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DashboardAgents.BlueprintAgent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DashboardAgents.Core\DashboardAgents.Core.csproj" />
+    <ProjectReference Include="..\DashboardAgents.Llm\DashboardAgents.Llm.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- These are the same prompts/*.md files from the original tool, carried over verbatim
+         so the agent's behaviour (8-step workflow, 9 self-review gates, forbidden-output rules)
+         is identical to the JS version. -->
+    <EmbeddedResource Include="Prompts\*.md" />
+  </ItemGroup>
+
+</Project>
