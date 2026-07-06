@@ -22,10 +22,10 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly IAnthropicClient _llm;
+    private readonly ILlmClient _llm;
     private readonly ILogger<BlueprintGenerationService> _logger;
 
-    public BlueprintGenerationService(IAnthropicClient llm, ILogger<BlueprintGenerationService> logger)
+    public BlueprintGenerationService(ILlmClient llm, ILogger<BlueprintGenerationService> logger)
     {
         _llm = llm;
         _logger = logger;

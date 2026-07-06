@@ -10,7 +10,15 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Anthropic ────────────────────────────────────────────────────────────────
+// ── OpenAI (primary provider) ────────────────────────────────────────────────
+builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection(OpenAiOptions.SectionName));
+builder.Services.PostConfigure<OpenAiOptions>(opts =>
+{
+    if (string.IsNullOrWhiteSpace(opts.ApiKey))
+        opts.ApiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "";
+});
+
+// ── Anthropic (optional — configure Anthropic:ApiKey to enable) ──────────────
 builder.Services.Configure<AnthropicOptions>(builder.Configuration.GetSection(AnthropicOptions.SectionName));
 builder.Services.PostConfigure<AnthropicOptions>(opts =>
 {
@@ -33,10 +41,33 @@ builder.Services.AddHttpClient<KoruApiClient>((sp, client) =>
     }
 });
 
-// ── HTTP client for the Anthropic API ───────────────────────────────────────
-builder.Services.AddHttpClient<IAnthropicClient, AnthropicClient>(client =>
+// ── HTTP clients ─────────────────────────────────────────────────────────────
+builder.Services.AddHttpClient<OpenAiClient>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(3);
+});
+
+// Anthropic client registered but NOT bound to ILlmClient unless selected below
+builder.Services.AddHttpClient<AnthropicClient>(client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(3);
+});
+
+// Resolve ILlmClient: use Anthropic only when explicitly selected AND key is present;
+// otherwise default to OpenAI.
+builder.Services.AddScoped<ILlmClient>(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var provider = cfg["Llm:Provider"]?.Trim().ToLowerInvariant() ?? "openai";
+
+    if (provider == "anthropic")
+    {
+        var anthropicOpts = sp.GetRequiredService<IOptions<AnthropicOptions>>().Value;
+        if (!string.IsNullOrWhiteSpace(anthropicOpts.ApiKey))
+            return sp.GetRequiredService<AnthropicClient>();
+    }
+
+    return sp.GetRequiredService<OpenAiClient>();
 });
 
 // ── Schema connector (live DB introspection) ────────────────────────────────
