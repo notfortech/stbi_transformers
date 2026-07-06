@@ -3,120 +3,53 @@ using DashboardAgents.BlueprintAgent;
 using DashboardAgents.Llm;
 using DashboardAgents.SchemaConnector;
 using DashboardAgents.TweakAgent;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Anthropic ────────────────────────────────────────────────────────────────
+// ── Configuration ────────────────────────────────────────────────────────
 builder.Services.Configure<AnthropicOptions>(builder.Configuration.GetSection(AnthropicOptions.SectionName));
+
+// Allow the API key to come from an environment variable even if appsettings.json is committed
+// without one — never commit a real key to source control.
 builder.Services.PostConfigure<AnthropicOptions>(opts =>
 {
     if (string.IsNullOrWhiteSpace(opts.ApiKey))
-        opts.ApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? "";
-});
-
-// ── Koru integration ─────────────────────────────────────────────────────────
-builder.Services.Configure<KoruOptions>(builder.Configuration.GetSection(KoruOptions.SectionName));
-builder.Services.AddHttpClient<KoruApiClient>((sp, client) =>
-{
-    var opts = sp.GetRequiredService<IOptions<KoruOptions>>().Value;
-    if (!string.IsNullOrWhiteSpace(opts.BaseUrl))
     {
-        client.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/'));
-        client.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds > 0 ? opts.TimeoutSeconds : 30);
-
-        if (!string.IsNullOrWhiteSpace(opts.ServiceApiKey))
-            client.DefaultRequestHeaders.Add("X-Service-Api-Key", opts.ServiceApiKey);
+        opts.ApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? "";
     }
 });
 
-// ── HTTP client for the Anthropic API ───────────────────────────────────────
+// ── HTTP client for the Anthropic API ───────────────────────────────────
 builder.Services.AddHttpClient<IAnthropicClient, AnthropicClient>(client =>
 {
-    client.Timeout = TimeSpan.FromMinutes(3);
+    client.Timeout = TimeSpan.FromMinutes(3); // blueprint generation is a large single completion
 });
 
-// ── Schema connector (live DB introspection) ────────────────────────────────
+// ── Schema connector (live DB introspection) ────────────────────────────
 builder.Services.AddScoped<IDbSchemaReader, SqlServerSchemaReader>();
 builder.Services.AddScoped<IDbSchemaReader, PostgresSchemaReader>();
 builder.Services.AddScoped<ISchemaReaderFactory, SchemaReaderFactory>();
 
-// ── Pipeline services ────────────────────────────────────────────────────────
-builder.Services.AddSingleton<IPipelineSessionStore, InMemoryPipelineSessionStore>();
-builder.Services.AddSingleton<IBlueprintStore, InMemoryBlueprintStore>();
-builder.Services.AddScoped<IFileIngestionService, FileIngestionService>();
-builder.Services.AddScoped<IColumnValidationService, ColumnValidationService>();
-builder.Services.AddScoped<IDesignMatchingService, DesignMatchingService>();
-
-// ── Blueprint + tweak agents ─────────────────────────────────────────────────
+// ── Blueprint generation agent ───────────────────────────────────────────
 builder.Services.AddScoped<IBlueprintGenerationService, BlueprintGenerationService>();
+
+// ── Use-case tweak agent ─────────────────────────────────────────────────
 builder.Services.AddScoped<IUseCaseTweakService, UseCaseTweakService>();
 
-// ── Auth: validate the same JWT issued by koru-main ─────────────────────────
-var jwtSection = builder.Configuration.GetSection("Jwt");
-var jwtKey = jwtSection["Key"] ?? Environment.GetEnvironmentVariable("JWT_KEY") ?? "";
-var jwtIssuer = jwtSection["Issuer"] ?? "";
-var jwtAudience = jwtSection["Audience"] ?? "";
-
-if (!string.IsNullOrWhiteSpace(jwtKey))
-{
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
-        {
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-                ValidateIssuer = !string.IsNullOrWhiteSpace(jwtIssuer),
-                ValidIssuer = jwtIssuer,
-                ValidateAudience = !string.IsNullOrWhiteSpace(jwtAudience),
-                ValidAudience = jwtAudience,
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.FromMinutes(5)
-            };
-        });
-    builder.Services.AddAuthorization();
-}
+// ── Blueprint persistence (swap for real storage later) ──────────────────
+builder.Services.AddSingleton<IBlueprintStore, InMemoryBlueprintStore>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new() { Title = "DashboardAgents API", Version = "v1" });
-    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "JWT Bearer token issued by koru-main"
-    });
-    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
-    {
-        {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-            {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
-                    { Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme, Id = "Bearer" }
-            },
-            Array.Empty<string>()
-        }
-    });
-});
+builder.Services.AddSwaggerGen();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("PortalClient", policy =>
     {
         var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-        if (origins.Length > 0)
-            policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
-        else
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
     });
 });
 
@@ -130,13 +63,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("PortalClient");
-
-if (!string.IsNullOrWhiteSpace(jwtKey))
-{
-    app.UseAuthentication();
-    app.UseAuthorization();
-}
-
 app.MapControllers();
 
 app.Run();

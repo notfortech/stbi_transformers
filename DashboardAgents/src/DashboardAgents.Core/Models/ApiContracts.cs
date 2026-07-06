@@ -5,18 +5,9 @@ public sealed class BlueprintGenerationOptions
 {
     /// <summary>"requirements" or "schema" — mirrors the two input modes in the original tool.</summary>
     public string Mode { get; set; } = "schema";
-    /// <summary>Free-text business requirements or business goal description.</summary>
     public string? Requirements { get; set; }
-    /// <summary>Alias for Requirements — used by the pipeline flow.</summary>
-    public string? BusinessGoal
-    {
-        get => Requirements;
-        set => Requirements = value;
-    }
     public string? SchemaText { get; set; }
     public string? IndustryExplicit { get; set; }
-    /// <summary>Domain-specific terminology context to inform blueprint generation.</summary>
-    public string? KnowledgePack { get; set; }
     public string Audience { get; set; } = "Executive";
     public string Currency { get; set; } = "AUD";
     public string FiscalYearStart { get; set; } = "July";
