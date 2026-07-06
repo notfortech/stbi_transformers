@@ -23,10 +23,10 @@ public sealed class UseCaseTweakService : IUseCaseTweakService
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly IAnthropicClient _llm;
+    private readonly ILlmClient _llm;
     private readonly ILogger<UseCaseTweakService> _logger;
 
-    public UseCaseTweakService(IAnthropicClient llm, ILogger<UseCaseTweakService> logger)
+    public UseCaseTweakService(ILlmClient llm, ILogger<UseCaseTweakService> logger)
     {
         _llm = llm;
         _logger = logger;

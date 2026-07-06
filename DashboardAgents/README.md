@@ -42,8 +42,7 @@ Live DB ──► SchemaConnector ──► BlueprintAgent ──► Blueprint (
 
 ## Setup
 
-Requires the .NET 8 SDK (this environment can't run `dotnet build`/`dotnet restore` — no SDK
-and no NuGet access — so verify on your own machine or CI):
+Requires the .NET 8 SDK:
 
 ```bash
 cd DashboardAgents
@@ -51,22 +50,71 @@ dotnet restore
 dotnet build
 ```
 
-### Configure the Anthropic API key
+### Configure the OpenAI API key (local dev)
 
-Never commit a real key. Pick one:
+Never commit a real key. Use user-secrets for local development:
 
 ```bash
-# Environment variable (read by Program.cs as a fallback if appsettings has none)
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# Or user-secrets for local dev
 cd src/DashboardAgents.Api
-dotnet user-secrets init
-dotnet user-secrets set "Anthropic:ApiKey" "sk-ant-..."
+dotnet user-secrets set "OpenAI:ApiKey" "sk-..."
 ```
 
-In production, wire `appsettings.json`'s `Anthropic:ApiKey` from your cloud secret manager
-(Azure Key Vault, AWS Secrets Manager, etc.) via standard ASP.NET Core configuration providers.
+Or set the `OPENAI_API_KEY` environment variable. To use Anthropic instead, also set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
+
+---
+
+## Azure Deployment
+
+The API is deployed to **Azure App Service (Linux, .NET 8)** via GitHub Actions.
+
+### Azure Web App settings
+
+In the Azure Portal, go to **App Service → Configuration → General settings** and set:
+- **Stack**: `.NET`
+- **.NET version**: `.NET 8 (LTS)`
+
+### GitHub Actions — required secrets
+
+Add these in your GitHub repo under **Settings → Secrets and variables → Actions**:
+
+| Secret | Where to get it |
+|---|---|
+| `AZUREAPPSERVICE_CLIENTID` | Azure AD App Registration → Application (client) ID |
+| `AZUREAPPSERVICE_TENANTID` | Azure AD → Directory (tenant) ID |
+| `AZUREAPPSERVICE_SUBSCRIPTIONID` | Azure Portal → Subscriptions |
+
+> The workflow uses OIDC federated identity — no client secret needed. Set up a Federated Credential on the App Registration with subject `repo:notfortech/stbi_transformers:ref:refs/heads/main`.
+
+Update the `app-name` in `.github/workflows/deploy.yml` to match your Azure Web App name.
+
+### Azure App Service — Application Settings (environment variables)
+
+| Setting Name | Required | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | **Yes** | OpenAI API key |
+| `JWT_KEY` | Yes (if auth on) | Must match koru-main's JWT signing key |
+| `JWT_ISSUER` | Recommended | JWT issuer claim |
+| `JWT_AUDIENCE` | Recommended | JWT audience claim |
+| `KORU_BASE_URL` | Recommended | koru-main API base URL |
+| `KORU_API_KEY` | Recommended | Service-to-service API key for koru-main |
+| `REDIS_CONNECTION` | Recommended | Azure Cache for Redis connection string |
+| `CORS_ORIGINS` | **Yes** | Frontend URL, e.g. `https://app.studiotechbi.com` |
+| `KEY_VAULT_URL` | Optional | Azure Key Vault URL — pulls secrets at startup via Managed Identity |
+| `ANTHROPIC_API_KEY` | Optional | Only needed if switching provider to Anthropic |
+| `LLM_PROVIDER` | Optional | `openai` (default) or `anthropic` |
+
+### Redis (session durability)
+
+Without Redis, pipeline sessions and blueprints are held in memory and are lost on restart or across multiple instances. Provision an **Azure Cache for Redis** (Basic C0 is sufficient) and set the primary connection string as `REDIS_CONNECTION`.
+
+### Azure Key Vault (optional)
+
+1. Create a Key Vault and enable **System-assigned Managed Identity** on the App Service.
+2. Grant the identity `Key Vault Secrets User` role on the vault.
+3. Add secrets using the config key name with `:` replaced by `--` (e.g. `OpenAI--ApiKey`).
+4. Set `KEY_VAULT_URL=https://your-vault.vault.azure.net/` in App Service Application Settings.
+
+The app loads Key Vault secrets at startup and they override `appsettings.json` values.
 
 ### Run
 
