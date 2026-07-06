@@ -13,6 +13,8 @@ public sealed class BlueprintGenerationOptions
     public string FiscalYearStart { get; set; } = "July";
     public bool RlsRequired { get; set; } = true;
     public string RefreshCadence { get; set; } = "Daily";
+    public string? BusinessGoal { get; set; }
+    public string? KnowledgePack { get; set; }
 }
 
 /// <summary>Request to introspect a live database and turn it directly into a blueprint.</summary>
