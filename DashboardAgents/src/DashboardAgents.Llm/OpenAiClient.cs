@@ -83,7 +83,3 @@ public sealed class OpenAiClient : ILlmClient
     }
 }
 
-public sealed class LlmProviderException : Exception
-{
-    public LlmProviderException(string message) : base(message) { }
-}
