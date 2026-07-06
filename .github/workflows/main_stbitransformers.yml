@@ -52,4 +52,4 @@ jobs:
           app-name: 'stbitransformers'
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_F330569C284B4783B7493643CF5AF111 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_AEFC504ECDAE4A78A35F2594D9D36082 }}
