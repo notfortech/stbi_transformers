@@ -20,6 +20,13 @@ builder.Services.PostConfigure<AnthropicOptions>(opts =>
     }
 });
 
+builder.Services.Configure<KoruAuthOptions>(builder.Configuration.GetSection(KoruAuthOptions.SectionName));
+builder.Services.PostConfigure<KoruAuthOptions>(opts =>
+{
+    if (string.IsNullOrWhiteSpace(opts.ApiKey))
+        opts.ApiKey = Environment.GetEnvironmentVariable("KORU_API_KEY") ?? "";
+});
+
 // ── HTTP client for the Anthropic API ───────────────────────────────────
 builder.Services.AddHttpClient<IAnthropicClient, AnthropicClient>(client =>
 {
@@ -63,6 +70,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("PortalClient");
+app.UseMiddleware<ApiKeyMiddleware>();
 app.MapControllers();
 
 app.Run();
