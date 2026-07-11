@@ -100,9 +100,25 @@ app.MapPost("/api/reports/generate", async (
 
         var templateId = form["templateId"].ToString();
 
+        var filters = form["filters"].ToString();
+        if (!string.IsNullOrWhiteSpace(filters))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(filters);
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                    return Results.BadRequest(new { error = "'filters' must be a JSON object of {column: value} pairs." });
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return Results.BadRequest(new { error = "'filters' is not valid JSON." });
+            }
+        }
+
         var result = await runner.GenerateAsync(
             fileStream.ToArray(), file.FileName,
-            string.IsNullOrWhiteSpace(templateId) ? null : templateId, ct);
+            string.IsNullOrWhiteSpace(templateId) ? null : templateId,
+            string.IsNullOrWhiteSpace(filters) ? null : filters, ct);
 
         if (!result.Success)
         {

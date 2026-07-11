@@ -38,6 +38,7 @@ public sealed class PythonAgentRunner
         byte[] fileBytes,
         string fileName,
         string? templateId,
+        string? filtersJson,
         CancellationToken requestAborted)
     {
         var requestId = Guid.NewGuid().ToString("N");
@@ -78,6 +79,10 @@ public sealed class PythonAgentRunner
             if (!string.IsNullOrWhiteSpace(templateId))
             {
                 psi.ArgumentList.Add("--template-id"); psi.ArgumentList.Add(templateId);
+            }
+            if (!string.IsNullOrWhiteSpace(filtersJson))
+            {
+                psi.ArgumentList.Add("--filters"); psi.ArgumentList.Add(filtersJson);
             }
             psi.ArgumentList.Add("-o"); psi.ArgumentList.Add(outputPath);
             psi.ArgumentList.Add("--timeout"); psi.ArgumentList.Add(_options.TimeoutSeconds.ToString());

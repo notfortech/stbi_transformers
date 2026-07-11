@@ -69,6 +69,7 @@ def main() -> int:
     parser.add_argument("--csv-dir", help="Directory of CSV files, as an alternative to --workbook")
     parser.add_argument("--templates-dir", required=True, help="Path to the template registry directory")
     parser.add_argument("--template-id", help="Force a specific template; default is the best rule-based match")
+    parser.add_argument("--filters", help='JSON object of {column: value} slicer filters, e.g. \'{"Region":"North"}\'')
     parser.add_argument("-o", "--output", required=True, help="Write JSON result here")
     parser.add_argument("--timeout", type=int, default=90, help="Hard wall-clock timeout in seconds")
     parser.add_argument("--max-memory-mb", type=int, default=1536)
@@ -91,7 +92,13 @@ def main() -> int:
         if template is None:
             raise ValueError("No template in the registry matches this dataset's column shape.")
 
-        result = build_report(template, loaded.tables, profiles)
+        filters = None
+        if args.filters:
+            filters = json.loads(args.filters)
+            if not isinstance(filters, dict):
+                raise ValueError("--filters must be a JSON object of {column: value} pairs.")
+
+        result = build_report(template, loaded.tables, profiles, filters)
         result["warnings"] = loaded.warnings + result["warnings"]
     except (ValueError, data_loader.DataLoadError, json.JSONDecodeError) as e:
         print(f"Error: {e}", file=sys.stderr)
