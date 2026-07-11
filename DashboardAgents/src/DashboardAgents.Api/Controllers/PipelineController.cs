@@ -49,8 +49,10 @@ public sealed class PipelineController : ControllerBase
 
     /// <summary>
     /// Connect to a data source and extract its schema.
-    /// Accepts a base64-encoded CSV/TSV file (provider = "file") or a live database
-    /// connection string (provider = "sqlserver" | "postgres").
+    /// Accepts a base64-encoded CSV/TSV file (provider = "file"), a live database
+    /// connection string (provider = "sqlserver" | "postgres"), or schema metadata the
+    /// caller already extracted itself (provider = "schema" — no raw data or file bytes
+    /// are sent in this mode).
     /// Returns a sessionId used in subsequent steps.
     /// </summary>
     [HttpPost("connect")]
@@ -60,7 +62,7 @@ public sealed class PipelineController : ControllerBase
     public async Task<IActionResult> Connect([FromBody] ConnectRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Provider))
-            return BadRequest(new { message = "provider is required (\"file\", \"sqlserver\", or \"postgres\")." });
+            return BadRequest(new { message = "provider is required (\"file\", \"sqlserver\", \"postgres\", or \"schema\")." });
 
         SchemaSnapshot schema;
         var source = request.Provider.ToLowerInvariant();
@@ -85,6 +87,32 @@ public sealed class PipelineController : ControllerBase
                 }
 
                 schema = await _fileIngestion.IngestAsync(bytes, fileName, cancellationToken);
+            }
+            else if (source == "schema")
+            {
+                if (request.Schema is null || request.Schema.Tables.Count == 0)
+                    return BadRequest(new { message = "schema.tables must contain at least one table for provider=\"schema\"." });
+
+                fileName = request.FileName;
+                schema = new SchemaSnapshot
+                {
+                    DatabaseName = string.IsNullOrWhiteSpace(request.Schema.DatabaseName)
+                        ? "dataset"
+                        : request.Schema.DatabaseName,
+                    Provider = DbProvider.SqlServer, // nominal — no live DB is involved in this mode
+                    Tables = request.Schema.Tables.Select(t => new TableMetadata
+                    {
+                        SchemaName = "dbo",
+                        TableName = t.TableName,
+                        ApproximateRowCount = t.ApproximateRowCount is > 0 ? t.ApproximateRowCount : null,
+                        Columns = t.Columns.Select(c => new ColumnMetadata
+                        {
+                            ColumnName = c.ColumnName,
+                            DataType = c.DataType,
+                            IsNullable = c.IsNullable
+                        }).ToList()
+                    }).ToList()
+                };
             }
             else
             {
