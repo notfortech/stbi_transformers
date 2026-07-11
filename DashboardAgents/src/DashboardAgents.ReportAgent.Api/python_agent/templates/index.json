@@ -1,0 +1,10 @@
+[
+  {
+    "id": "generic-overview",
+    "file": "generic-overview.json",
+    "name": "Generic Overview",
+    "industry": null,
+    "description": "Numeric KPI cards, a trend line (if a date column exists), and category breakdowns (if categorical columns exist). Matches any connected dataset with at least one numeric column.",
+    "requires": { "minNumeric": 1 }
+  }
+]
