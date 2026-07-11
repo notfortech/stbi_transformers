@@ -104,15 +104,55 @@ def match_template(templates: list[dict], profiles: list[ColumnProfile]) -> dict
     return None
 
 
-def build_report(template: dict, tables: dict[str, pd.DataFrame], profiles: list[ColumnProfile]) -> dict:
+def build_slicers(df: pd.DataFrame, categorical_cols: list[str], max_columns: int = 5, max_values: int = 50) -> list[dict]:
+    """Slicer options are always computed from the FULL (unfiltered) table so
+    the available choices never shrink as the user applies a filter."""
+    slicers = []
+    for col in categorical_cols[:max_columns]:
+        values = sorted(df[col].dropna().astype(str).unique().tolist())[:max_values]
+        if values:
+            slicers.append({"column": col, "values": values})
+    return slicers
+
+
+def apply_filters(
+    df: pd.DataFrame, filters: dict[str, str] | None, filterable_cols: list[str], warnings: list[str]
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Exact-match, AND-combined filtering — never a raw query string, only
+    column=value pairs checked against the columns we already exposed as
+    slicers, so a filter can never reach into a column the caller wasn't
+    shown as filterable."""
+    applied: dict[str, str] = {}
+    if not filters:
+        return df, applied
+    for col, value in filters.items():
+        if col not in filterable_cols:
+            warnings.append(f'Ignored filter on "{col}" — not a recognized filterable column.')
+            continue
+        df = df[df[col].astype(str) == str(value)]
+        applied[col] = value
+    return df, applied
+
+
+def build_report(
+    template: dict,
+    tables: dict[str, pd.DataFrame],
+    profiles: list[ColumnProfile],
+    filters: dict[str, str] | None = None,
+) -> dict:
     warnings: list[str] = []
     primary = pick_primary_table(tables)
-    df = tables[primary]
+    full_df = tables[primary]
     primary_profiles = [p for p in profiles if p.table == primary]
 
     numeric_cols = [p.column for p in primary_profiles if p.role == "numeric"]
     date_cols = [p.column for p in primary_profiles if p.role == "date"]
     categorical_cols = [p.column for p in primary_profiles if p.role == "categorical"]
+
+    slicers = build_slicers(full_df, categorical_cols)
+    df, applied_filters = apply_filters(full_df, filters, categorical_cols, warnings)
+    if filters and df.empty:
+        warnings.append("No rows match the selected filter(s) — showing an empty report.")
 
     kpis: list[dict] = []
     charts: list[dict] = []
@@ -185,5 +225,7 @@ def build_report(template: dict, tables: dict[str, pd.DataFrame], profiles: list
         "primaryTable": primary,
         "kpis": kpis,
         "charts": charts,
+        "slicers": slicers,
+        "appliedFilters": applied_filters,
         "warnings": warnings,
     }
