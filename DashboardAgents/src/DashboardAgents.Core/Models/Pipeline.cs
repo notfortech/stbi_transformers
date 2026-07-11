@@ -105,10 +105,10 @@ public sealed class ColumnMapping
 
 public sealed class ConnectRequest
 {
-    /// <summary>"file" | "sqlserver" | "postgres"</summary>
+    /// <summary>"file" | "sqlserver" | "postgres" | "schema"</summary>
     public string Provider { get; set; } = "file";
 
-    /// <summary>DB connection string — required when Provider is not "file".</summary>
+    /// <summary>DB connection string — required when Provider is not "file" or "schema".</summary>
     public string? ConnectionString { get; set; }
 
     /// <summary>Base64-encoded file bytes — required when Provider is "file".</summary>
@@ -118,6 +118,33 @@ public sealed class ConnectRequest
 
     /// <summary>Schema filter (DB provider only); null = all schemas.</summary>
     public IReadOnlyList<string>? SchemaFilter { get; set; }
+
+    /// <summary>
+    /// Pre-extracted schema metadata — required when Provider is "schema". Used by callers
+    /// (e.g. koru-main) that already introspect the source themselves and only ever send
+    /// structural metadata onward, never raw file bytes or a live connection string.
+    /// </summary>
+    public PreExtractedSchemaDto? Schema { get; set; }
+}
+
+public sealed class PreExtractedSchemaDto
+{
+    public string DatabaseName { get; set; } = "";
+    public List<PreExtractedTableDto> Tables { get; set; } = new();
+}
+
+public sealed class PreExtractedTableDto
+{
+    public string TableName { get; set; } = "";
+    public long? ApproximateRowCount { get; set; }
+    public List<PreExtractedColumnDto> Columns { get; set; } = new();
+}
+
+public sealed class PreExtractedColumnDto
+{
+    public string ColumnName { get; set; } = "";
+    public string DataType { get; set; } = "";
+    public bool IsNullable { get; set; }
 }
 
 public sealed class ConnectResponse
