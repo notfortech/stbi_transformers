@@ -141,6 +141,7 @@ try
     builder.Services.AddScoped<IDesignMatchingService, DesignMatchingService>();
     builder.Services.AddScoped<IBlueprintGenerationService, BlueprintGenerationService>();
     builder.Services.AddScoped<IUseCaseTweakService, UseCaseTweakService>();
+    builder.Services.AddScoped<ISchemaModelMatchingService, SchemaModelMatchingService>();
 
     // ── JWT auth (shared with koru-main) ─────────────────────────────────────
     var jwtKey = builder.Configuration["Jwt:Key"] ?? "";
