@@ -38,7 +38,7 @@ public sealed class SchemaModelMatchCandidateField
 /// Exactly one of <see cref="MatchedModelId"/> or <see cref="ProposedModel"/> is set —
 /// the AI either picks one candidate by id, or proposes a brand-new model when nothing
 /// in the directory fits well. <see cref="Reasoning"/> is a short human-readable
-/// explanation surfaced to the support review queue for proposed models.
+/// explanation of why, surfaced alongside the result for traceability.
 /// </summary>
 public sealed class SchemaModelMatchResult
 {
@@ -53,4 +53,7 @@ public sealed class ProposedSchemaModel
     public string Name { get; set; } = string.Empty;
     public string Industry { get; set; } = string.Empty;
     public List<SchemaModelMatchCandidateField> Fields { get; set; } = new();
+
+    /// <summary>Name for the dashboard template koru-main creates alongside this model — no design/sections, just a label (e.g. "Government Annual Report — Overview").</summary>
+    public string TemplateName { get; set; } = string.Empty;
 }
