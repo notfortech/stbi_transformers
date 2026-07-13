@@ -51,9 +51,11 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
             "one of these two shapes:\n" +
             "Match:   {\"matchedModelId\": \"<id from the candidate list>\", \"confidence\": <0..1>, \"reasoning\": \"<one sentence>\"}\n" +
             "Propose: {\"proposedModel\": {\"name\": \"<short name>\", \"industry\": \"<industry>\", " +
+            "\"templateName\": \"<short dashboard name, e.g. '<name> — Overview'>\", " +
             "\"fields\": [{\"fieldName\": \"<name>\", \"dataType\": \"string|decimal|date|datetime|int|bool\", \"isRequired\": <bool>}]}, " +
             "\"confidence\": 0, \"reasoning\": \"<one sentence explaining why nothing in the directory fit>\"}\n" +
-            "Only propose a new model if the best candidate's semantic fit is genuinely weak — prefer matching.";
+            "Only propose a new model if the best candidate's semantic fit is genuinely weak — prefer matching. " +
+            "templateName is just a label — do not design dashboard layout/sections, koru-main handles that separately.";
 
         var userPrompt = BuildUserPrompt(request);
 
