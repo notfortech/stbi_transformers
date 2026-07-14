@@ -99,11 +99,13 @@ try
         client.Timeout = TimeSpan.FromMinutes(3);
     });
 
-    // Resolve ILlmClient: OpenAI by default; Anthropic only when explicitly selected + key present
+    // Resolve ILlmClient: Anthropic by default now (OpenAI's org hit its TPM rate limit in
+    // production). Falls back to OpenAI only if no Anthropic key is configured, or if
+    // Llm:Provider is explicitly set to "openai".
     builder.Services.AddScoped<ILlmClient>(sp =>
     {
         var cfg = sp.GetRequiredService<IConfiguration>();
-        var provider = cfg["Llm:Provider"]?.Trim().ToLowerInvariant() ?? "openai";
+        var provider = cfg["Llm:Provider"]?.Trim().ToLowerInvariant() ?? "anthropic";
         if (provider == "anthropic")
         {
             var anthropicOpts = sp.GetRequiredService<IOptions<AnthropicOptions>>().Value;
