@@ -49,13 +49,18 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
             "or whether none fit well enough and a new model should be proposed instead.\n\n" +
             "Respond with ONLY a single JSON object, no prose, no markdown fences, matching exactly " +
             "one of these two shapes:\n" +
-            "Match:   {\"matchedModelId\": \"<id from the candidate list>\", \"confidence\": <0..1>, \"reasoning\": \"<one sentence>\"}\n" +
+            "Match:   {\"matchedModelId\": \"<id from the candidate list>\", \"confidence\": <0..1>, " +
+            "\"fieldMappings\": [{\"fieldName\": \"<one of the matched candidate's field names>\", " +
+            "\"clientColumnName\": \"<the client column that means the same thing, or null if none does>\"}, " +
+            "...one entry for EVERY field of the matched candidate, in the same order they were given...], " +
+            "\"reasoning\": \"<one sentence>\"}\n" +
             "Propose: {\"proposedModel\": {\"name\": \"<short name>\", \"industry\": \"<industry>\", " +
             "\"templateName\": \"<short dashboard name, e.g. '<name> — Overview'>\", " +
             "\"fields\": [{\"fieldName\": \"<name>\", \"dataType\": \"string|decimal|date|datetime|int|bool\", \"isRequired\": <bool>}]}, " +
             "\"confidence\": 0, \"reasoning\": \"<one sentence explaining why nothing in the directory fit>\"}\n" +
             "Only propose a new model if the best candidate's semantic fit is genuinely weak — prefer matching. " +
-            "templateName is just a label — do not design dashboard layout/sections, koru-main handles that separately.";
+            "templateName is just a label — do not design dashboard layout/sections, koru-main handles that separately. " +
+            "fieldMappings is only relevant for a Match response — omit it entirely for a Propose response.";
 
         var userPrompt = BuildUserPrompt(request);
 
@@ -90,9 +95,31 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
             throw new BlueprintParseException("AI returned a matchedModelId that was not in the candidate list.");
         }
 
+        // fieldMappings is best-effort — the model may omit it despite the prompt, or name a
+        // field that isn't actually on the matched candidate (hallucination). Drop anything
+        // that doesn't correspond to a real field rather than failing the whole match over it;
+        // the caller (koru-main) already falls back to its own exact-name matching per field.
+        if (!string.IsNullOrWhiteSpace(result.MatchedModelId) && result.FieldMappings is { Count: > 0 })
+        {
+            var matchedCandidate = request.CandidateModels.First(c => c.Id == result.MatchedModelId);
+            var validFieldNames = matchedCandidate.Fields.Select(f => f.FieldName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var validColumnNames = request.Columns.Select(c => c.ColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var before = result.FieldMappings.Count;
+            result.FieldMappings = result.FieldMappings
+                .Where(fm => validFieldNames.Contains(fm.FieldName) &&
+                             (fm.ClientColumnName is null || validColumnNames.Contains(fm.ClientColumnName)))
+                .ToList();
+
+            if (result.FieldMappings.Count != before)
+                _logger.LogWarning(
+                    "SchemaModelMatch.DroppedInvalidFieldMappings Before={Before} After={After} MatchedModelId={MatchedModelId}",
+                    before, result.FieldMappings.Count, result.MatchedModelId);
+        }
+
         _logger.LogInformation(
-            "SchemaModelMatch.Completed MatchedModelId={MatchedModelId} ProposedNew={ProposedNew} Confidence={Confidence}",
-            result.MatchedModelId ?? "(none)", result.ProposedModel is not null, result.Confidence);
+            "SchemaModelMatch.Completed MatchedModelId={MatchedModelId} ProposedNew={ProposedNew} Confidence={Confidence} FieldMappingCount={FieldMappingCount}",
+            result.MatchedModelId ?? "(none)", result.ProposedModel is not null, result.Confidence, result.FieldMappings?.Count ?? 0);
 
         return result;
     }
