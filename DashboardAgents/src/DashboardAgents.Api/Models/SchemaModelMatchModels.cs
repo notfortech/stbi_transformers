@@ -46,6 +46,23 @@ public sealed class SchemaModelMatchResult
     public double Confidence { get; set; }
     public ProposedSchemaModel? ProposedModel { get; set; }
     public string? Reasoning { get; set; }
+
+    /// <summary>
+    /// Per-field client-column pairing for the winning candidate — only meaningful when
+    /// <see cref="MatchedModelId"/> is set (a freshly <see cref="ProposedModel"/>'s fields are
+    /// themselves derived from the client's columns, so there's no separate alias to record).
+    /// Ideally one entry per field of the matched candidate; a null <see cref="SchemaModelFieldMatch.ClientColumnName"/>
+    /// means that field had no reasonable match in the client's columns. May be null/empty if
+    /// the model didn't include it — callers must treat this as best-effort, not guaranteed.
+    /// </summary>
+    public List<SchemaModelFieldMatch>? FieldMappings { get; set; }
+}
+
+/// <summary>One field-to-column pairing the AI decided on while matching a candidate model.</summary>
+public sealed class SchemaModelFieldMatch
+{
+    public string FieldName { get; set; } = string.Empty;
+    public string? ClientColumnName { get; set; }
 }
 
 public sealed class ProposedSchemaModel
