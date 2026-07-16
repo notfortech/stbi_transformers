@@ -107,6 +107,27 @@ public sealed class BlueprintController : ControllerBase
         if (blueprint is null)
             return NotFound($"No blueprint found with id '{blueprintId}'. Generate one first via POST /api/blueprint/generate.");
 
+        return await AuthorTmdlInternal(blueprint, cancellationToken);
+    }
+
+    /// <summary>
+    /// S9 — same as above, but the blueprint is sent directly in the request body instead of
+    /// looked up by id. Needed because koru-main's actual AI-assisted flow calls
+    /// PipelineController.Generate, which returns its Blueprint straight in the HTTP response
+    /// and never saves it to IBlueprintStore (unlike Generate/FromConnection above) — so
+    /// koru-main sends back the blueprint it already has rather than this service needing to
+    /// have persisted it first.
+    /// </summary>
+    [HttpPost("author-tmdl")]
+    [ProducesResponseType(typeof(TmdlAuthoringResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(422)]
+    [ProducesResponseType(502)]
+    public async Task<IActionResult> AuthorTmdlFromBody([FromBody] AuthorTmdlRequest request, CancellationToken cancellationToken)
+        => await AuthorTmdlInternal(request.Blueprint, cancellationToken);
+
+    private async Task<IActionResult> AuthorTmdlInternal(Blueprint blueprint, CancellationToken cancellationToken)
+    {
         var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
             ? headerValue.ToString()
             : Guid.NewGuid().ToString();
@@ -120,7 +141,7 @@ public sealed class BlueprintController : ControllerBase
             {
                 _logger.LogWarning(
                     "TMDL authoring for blueprint {BlueprintId} failed deterministic validation: {Violations}",
-                    blueprintId, string.Join(" | ", result.Validation.Violations));
+                    blueprint.BlueprintId, string.Join(" | ", result.Validation.Violations));
                 return UnprocessableEntity(new
                 {
                     message = "Authored TMDL failed deterministic validation.",
@@ -137,7 +158,7 @@ public sealed class BlueprintController : ControllerBase
         }
         catch (BlueprintParseException ex)
         {
-            _logger.LogError(ex, "TMDL authoring failed for blueprint {BlueprintId}", blueprintId);
+            _logger.LogError(ex, "TMDL authoring failed for blueprint {BlueprintId}", blueprint.BlueprintId);
             return Problem(title: "TMDL authoring failed", detail: ex.Message, statusCode: 502);
         }
     }

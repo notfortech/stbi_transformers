@@ -43,6 +43,19 @@ public sealed class GenerateBlueprintRequest
     public BlueprintGenerationOptions Options { get; set; } = new();
 }
 
+/// <summary>
+/// Request to author TMDL directly from an in-hand blueprint, rather than one looked up by id
+/// from IBlueprintStore. Needed because PipelineController.Generate (the AI-assisted flow
+/// koru-main's ReportDesignerClient actually calls) returns its Blueprint straight in the HTTP
+/// response and never persists it — unlike BlueprintController.Generate/FromConnection, which
+/// does save to IBlueprintStore. Rather than making the pipeline flow persist a blueprint it
+/// never needed to before, the caller (koru-main) just sends back the blueprint it already has.
+/// </summary>
+public sealed class AuthorTmdlRequest
+{
+    public Blueprint Blueprint { get; set; } = new();
+}
+
 /// <summary>Request to adapt an existing blueprint to a specific use-case scenario.</summary>
 public sealed class TweakRequest
 {
