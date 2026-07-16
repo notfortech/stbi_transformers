@@ -142,12 +142,10 @@ public sealed class BlueprintController : ControllerBase
                 _logger.LogWarning(
                     "TMDL authoring for blueprint {BlueprintId} failed deterministic validation: {Violations}",
                     blueprint.BlueprintId, string.Join(" | ", result.Validation.Violations));
-                return UnprocessableEntity(new
-                {
-                    message = "Authored TMDL failed deterministic validation.",
-                    violations = result.Validation.Violations,
-                    files = result.Files
-                });
+                // Same TmdlAuthoringResult shape as the 200 path (files/reasoning/validation) —
+                // callers deserialize one response type regardless of status code and just check
+                // validation.isValid, rather than needing a second shape for the failure case.
+                return UnprocessableEntity(result);
             }
 
             return Ok(result);
