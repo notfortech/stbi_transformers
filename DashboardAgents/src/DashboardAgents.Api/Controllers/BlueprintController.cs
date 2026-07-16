@@ -86,9 +86,13 @@ public sealed class BlueprintController : ControllerBase
 
     private async Task<IActionResult> GenerateInternal(BlueprintGenerationOptions options, CancellationToken cancellationToken)
     {
+        var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
+            ? headerValue.ToString()
+            : Guid.NewGuid().ToString();
+
         try
         {
-            var blueprint = await _generationService.GenerateAsync(options, cancellationToken);
+            var blueprint = await _generationService.GenerateAsync(options, correlationId, cancellationToken);
             _store.Save(blueprint);
             return Ok(blueprint);
         }

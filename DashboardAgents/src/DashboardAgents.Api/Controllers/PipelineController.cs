@@ -311,11 +311,15 @@ public sealed class PipelineController : ControllerBase
             KnowledgePack = request?.KnowledgePack
         };
 
+        var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
+            ? headerValue.ToString()
+            : Guid.NewGuid().ToString();
+
         var sw = Stopwatch.StartNew();
         Blueprint blueprint;
         try
         {
-            blueprint = await _blueprintGeneration.GenerateAsync(options, cancellationToken);
+            blueprint = await _blueprintGeneration.GenerateAsync(options, correlationId, cancellationToken);
         }
         catch (ArgumentException ex)
         {

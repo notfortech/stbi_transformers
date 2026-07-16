@@ -38,9 +38,13 @@ public sealed class TweakController : ControllerBase
         if (string.IsNullOrWhiteSpace(body.Scenario))
             return BadRequest("scenario is required.");
 
+        var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
+            ? headerValue.ToString()
+            : Guid.NewGuid().ToString();
+
         try
         {
-            var result = await _tweakService.AdaptAsync(blueprint, body.Scenario, cancellationToken);
+            var result = await _tweakService.AdaptAsync(blueprint, body.Scenario, correlationId, cancellationToken);
 
             if (body.PersistToBlueprint && result.Mode == "composed_new")
             {

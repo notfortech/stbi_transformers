@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using DashboardAgents.Core.Models;
+using DashboardAgents.Core.Services;
 using DashboardAgents.Llm;
 using Microsoft.Extensions.Logging;
 
@@ -7,7 +9,8 @@ namespace DashboardAgents.BlueprintAgent;
 
 public interface IBlueprintGenerationService
 {
-    Task<Blueprint> GenerateAsync(BlueprintGenerationOptions options, CancellationToken cancellationToken = default);
+    Task<Blueprint> GenerateAsync(
+        BlueprintGenerationOptions options, string correlationId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -24,14 +27,17 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
 
     private readonly ILlmClient _llm;
     private readonly ILogger<BlueprintGenerationService> _logger;
+    private readonly IAiBoundaryAuditPublisher _audit;
 
-    public BlueprintGenerationService(ILlmClient llm, ILogger<BlueprintGenerationService> logger)
+    public BlueprintGenerationService(ILlmClient llm, ILogger<BlueprintGenerationService> logger, IAiBoundaryAuditPublisher audit)
     {
         _llm = llm;
         _logger = logger;
+        _audit = audit;
     }
 
-    public async Task<Blueprint> GenerateAsync(BlueprintGenerationOptions options, CancellationToken cancellationToken = default)
+    public async Task<Blueprint> GenerateAsync(
+        BlueprintGenerationOptions options, string correlationId, CancellationToken cancellationToken = default)
     {
         if (options.Mode == "requirements" && string.IsNullOrWhiteSpace(options.Requirements)
             || options.Mode == "schema" && string.IsNullOrWhiteSpace(options.SchemaText))
@@ -45,7 +51,26 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
         _logger.LogInformation("Requesting blueprint generation (mode={Mode}, industryOverride={Industry})",
             options.Mode, options.IndustryExplicit ?? "(auto-detect)");
 
-        var rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        await _audit.LogSentAsync(
+            "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+            new { mode = options.Mode, industryOverride = options.IndustryExplicit ?? "(auto-detect)" },
+            cancellationToken);
+
+        var sw = Stopwatch.StartNew();
+        string rawResponse;
+        try
+        {
+            rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sw.Stop();
+            await _audit.LogFailedAsync(
+                "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"LLM call failed: {ex.GetType().Name}", cancellationToken);
+            throw;
+        }
+        sw.Stop();
 
         using var doc = JsonExtraction.ExtractJsonDocument(rawResponse);
         var blueprint = JsonSerializer.Deserialize<Blueprint>(doc.RootElement.GetRawText(), JsonOptions)
@@ -57,12 +82,22 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
             _logger.LogWarning("Generated blueprint failed validation with {Count} violations: {Violations}",
                 validation.Violations.Count, string.Join(" | ", validation.Violations));
 
+            await _audit.LogFailedAsync(
+                "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"Blueprint failed validation: {validation.Violations.Count} violation(s)",
+                cancellationToken);
+
             // Fail closed rather than silently serving a blueprint that violates its own schema
             // contract (e.g. missing KPI owners, or fewer than the required 9 self-review gates).
             throw new BlueprintValidationException(validation.Violations);
         }
 
         blueprint.BlueprintId = Guid.NewGuid().ToString("N");
+
+        await _audit.LogReceivedAsync(
+            "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+            new { blueprintId = blueprint.BlueprintId }, sw.ElapsedMilliseconds, cancellationToken);
+
         return blueprint;
     }
 }

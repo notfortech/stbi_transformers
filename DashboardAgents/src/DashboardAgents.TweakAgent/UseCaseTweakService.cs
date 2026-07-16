@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Text.Json;
 using DashboardAgents.BlueprintAgent;
 using DashboardAgents.Core.Models;
+using DashboardAgents.Core.Services;
 using DashboardAgents.Llm;
 using Microsoft.Extensions.Logging;
 
@@ -8,7 +10,8 @@ namespace DashboardAgents.TweakAgent;
 
 public interface IUseCaseTweakService
 {
-    Task<TweakResult> AdaptAsync(Blueprint blueprint, string scenario, CancellationToken cancellationToken = default);
+    Task<TweakResult> AdaptAsync(
+        Blueprint blueprint, string scenario, string correlationId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -25,14 +28,17 @@ public sealed class UseCaseTweakService : IUseCaseTweakService
 
     private readonly ILlmClient _llm;
     private readonly ILogger<UseCaseTweakService> _logger;
+    private readonly IAiBoundaryAuditPublisher _audit;
 
-    public UseCaseTweakService(ILlmClient llm, ILogger<UseCaseTweakService> logger)
+    public UseCaseTweakService(ILlmClient llm, ILogger<UseCaseTweakService> logger, IAiBoundaryAuditPublisher audit)
     {
         _llm = llm;
         _logger = logger;
+        _audit = audit;
     }
 
-    public async Task<TweakResult> AdaptAsync(Blueprint blueprint, string scenario, CancellationToken cancellationToken = default)
+    public async Task<TweakResult> AdaptAsync(
+        Blueprint blueprint, string scenario, string correlationId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(scenario))
             throw new ArgumentException("A use-case scenario must be provided.", nameof(scenario));
@@ -53,7 +59,25 @@ public sealed class UseCaseTweakService : IUseCaseTweakService
 
         _logger.LogInformation("Adapting blueprint {BlueprintId} to scenario: {Scenario}", blueprint.BlueprintId, scenario);
 
-        var rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        await _audit.LogSentAsync(
+            "TweakAgent", "AdaptBlueprint", correlationId, _llm.ProviderName,
+            new { blueprintId = blueprint.BlueprintId }, cancellationToken);
+
+        var sw = Stopwatch.StartNew();
+        string rawResponse;
+        try
+        {
+            rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sw.Stop();
+            await _audit.LogFailedAsync(
+                "TweakAgent", "AdaptBlueprint", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"LLM call failed: {ex.GetType().Name}", cancellationToken);
+            throw;
+        }
+        sw.Stop();
 
         using var doc = JsonExtraction.ExtractJsonDocument(rawResponse);
         var parsed = JsonSerializer.Deserialize<TweakAgentResponse>(doc.RootElement.GetRawText(), JsonOptions)
@@ -72,8 +96,17 @@ public sealed class UseCaseTweakService : IUseCaseTweakService
         {
             _logger.LogWarning("Tweak agent output failed field allow-list validation: {Violations}",
                 string.Join(" | ", validation.Violations));
+            await _audit.LogFailedAsync(
+                "TweakAgent", "AdaptBlueprint", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"Output failed allow-list validation: {validation.Violations.Count} violation(s)",
+                cancellationToken);
             throw new TweakValidationException(validation.Violations);
         }
+
+        await _audit.LogReceivedAsync(
+            "TweakAgent", "AdaptBlueprint", correlationId, _llm.ProviderName,
+            new { mode = result.Mode, fieldsUsedCount = result.FieldsUsed?.Count ?? 0 }, sw.ElapsedMilliseconds,
+            cancellationToken);
 
         return result;
     }

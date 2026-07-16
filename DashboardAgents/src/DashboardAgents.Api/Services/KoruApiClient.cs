@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -10,6 +11,21 @@ public sealed class KoruOptions
     public string BaseUrl { get; set; } = "";
     public string? ServiceApiKey { get; set; }
     public int TimeoutSeconds { get; set; } = 30;
+}
+
+/// <summary>Mirrors koru-main's AiBoundaryAuditEventIngestRequest — see that file for field meanings.</summary>
+public sealed class AiBoundaryAuditEventPayload
+{
+    public string CorrelationId { get; set; } = "";
+    public string Service { get; set; } = "";
+    public string Operation { get; set; } = "";
+    public string Phase { get; set; } = "";
+    public string TargetService { get; set; } = "";
+    public string? MetadataJson { get; set; }
+    public long? DurationMs { get; set; }
+    public int? StatusCode { get; set; }
+    public string? ErrorSummary { get; set; }
+    public Guid? ClientId { get; set; }
 }
 
 public sealed class KoruTemplate
@@ -74,6 +90,47 @@ public sealed class KoruApiClient
         {
             _logger.LogWarning(ex, "Failed to fetch templates from koru-main");
             return new();
+        }
+    }
+
+    private static readonly JsonSerializerOptions CamelCaseJsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    /// <summary>
+    /// Pushes one AI-boundary audit event (see AiBoundaryAuditEventPayload) to koru-main's
+    /// AiBoundaryAuditEvents table. Uses a short, independent timeout — a slow or unreachable
+    /// koru-main must never add meaningful latency to the actual LLM call this is auditing —
+    /// and swallows every failure, same non-negotiable principle as koru-main's own
+    /// AiBoundaryAuditService.AddAsync: the audit log must never be able to break the flow it
+    /// watches.
+    /// </summary>
+    public async Task PostAiBoundaryAuditEventAsync(AiBoundaryAuditEventPayload payload, CancellationToken cancellationToken = default)
+    {
+        if (_http.BaseAddress is null)
+            return; // Koru:BaseUrl not configured — nothing to push to.
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            var content = JsonContent.Create(payload, options: CamelCaseJsonOpts);
+            using var resp = await _http.PostAsync("/api/internal/ai-boundary-audit-log", content, cts.Token);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "AiBoundaryAudit.PushFailed StatusCode={StatusCode} CorrelationId={CorrelationId} Phase={Phase}",
+                    (int)resp.StatusCode, payload.CorrelationId, payload.Phase);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "AiBoundaryAudit.PushFailed CorrelationId={CorrelationId} Phase={Phase} — continuing, audit push is best-effort",
+                payload.CorrelationId, payload.Phase);
         }
     }
 

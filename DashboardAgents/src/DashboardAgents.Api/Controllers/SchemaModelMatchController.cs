@@ -34,9 +34,13 @@ public sealed class SchemaModelMatchController : ControllerBase
         if (request.CandidateModels.Count == 0)
             return BadRequest(new { message = "candidateModels must contain at least one entry." });
 
+        var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
+            ? headerValue.ToString()
+            : Guid.NewGuid().ToString();
+
         try
         {
-            var result = await _matching.MatchAsync(request, cancellationToken);
+            var result = await _matching.MatchAsync(request, correlationId, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
