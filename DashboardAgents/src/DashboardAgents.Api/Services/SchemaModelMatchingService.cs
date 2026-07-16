@@ -1,14 +1,17 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using DashboardAgents.Api.Models;
 using DashboardAgents.BlueprintAgent;
+using DashboardAgents.Core.Services;
 using DashboardAgents.Llm;
 
 namespace DashboardAgents.Api.Services;
 
 public interface ISchemaModelMatchingService
 {
-    Task<SchemaModelMatchResult> MatchAsync(SchemaModelMatchRequest request, CancellationToken cancellationToken = default);
+    Task<SchemaModelMatchResult> MatchAsync(
+        SchemaModelMatchRequest request, string correlationId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -28,14 +31,17 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
 
     private readonly ILlmClient _llm;
     private readonly ILogger<SchemaModelMatchingService> _logger;
+    private readonly IAiBoundaryAuditPublisher _audit;
 
-    public SchemaModelMatchingService(ILlmClient llm, ILogger<SchemaModelMatchingService> logger)
+    public SchemaModelMatchingService(ILlmClient llm, ILogger<SchemaModelMatchingService> logger, IAiBoundaryAuditPublisher audit)
     {
         _llm = llm;
         _logger = logger;
+        _audit = audit;
     }
 
-    public async Task<SchemaModelMatchResult> MatchAsync(SchemaModelMatchRequest request, CancellationToken cancellationToken = default)
+    public async Task<SchemaModelMatchResult> MatchAsync(
+        SchemaModelMatchRequest request, string correlationId, CancellationToken cancellationToken = default)
     {
         if (request.Columns.Count == 0)
             throw new ArgumentException("At least one column is required.");
@@ -68,7 +74,26 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
             "SchemaModelMatch.Requested ColumnCount={ColumnCount} CandidateCount={CandidateCount}",
             request.Columns.Count, request.CandidateModels.Count);
 
-        var rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        await _audit.LogSentAsync(
+            "SchemaModelMatchingService", "MatchSchemaModel", correlationId, _llm.ProviderName,
+            new { columnCount = request.Columns.Count, candidateCount = request.CandidateModels.Count },
+            cancellationToken);
+
+        var sw = Stopwatch.StartNew();
+        string rawResponse;
+        try
+        {
+            rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sw.Stop();
+            await _audit.LogFailedAsync(
+                "SchemaModelMatchingService", "MatchSchemaModel", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"LLM call failed: {ex.GetType().Name}", cancellationToken);
+            throw;
+        }
+        sw.Stop();
 
         SchemaModelMatchResult result;
         try
@@ -80,11 +105,19 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
         catch (BlueprintParseException ex)
         {
             _logger.LogError(ex, "SchemaModelMatch.ParseFailed");
+            await _audit.LogFailedAsync(
+                "SchemaModelMatchingService", "MatchSchemaModel", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, "Response could not be parsed.", cancellationToken);
             throw;
         }
 
         if (string.IsNullOrWhiteSpace(result.MatchedModelId) && result.ProposedModel is null)
+        {
+            await _audit.LogFailedAsync(
+                "SchemaModelMatchingService", "MatchSchemaModel", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, "Result had neither a matchedModelId nor a proposedModel.", cancellationToken);
             throw new BlueprintParseException("Schema model match result had neither a matchedModelId nor a proposedModel.");
+        }
 
         if (!string.IsNullOrWhiteSpace(result.MatchedModelId) &&
             !request.CandidateModels.Any(c => c.Id == result.MatchedModelId))
@@ -92,6 +125,12 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
             _logger.LogWarning(
                 "SchemaModelMatch.HallucinatedId MatchedModelId={MatchedModelId} — treating as no match.",
                 result.MatchedModelId);
+            // This is exactly the kind of event the audit trail exists to prove happened —
+            // the AI proposed something outside its allowed candidate set and it was rejected,
+            // not silently accepted.
+            await _audit.LogFailedAsync(
+                "SchemaModelMatchingService", "MatchSchemaModel", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"Hallucinated matchedModelId '{result.MatchedModelId}' rejected.", cancellationToken);
             throw new BlueprintParseException("AI returned a matchedModelId that was not in the candidate list.");
         }
 
@@ -120,6 +159,17 @@ public sealed class SchemaModelMatchingService : ISchemaModelMatchingService
         _logger.LogInformation(
             "SchemaModelMatch.Completed MatchedModelId={MatchedModelId} ProposedNew={ProposedNew} Confidence={Confidence} FieldMappingCount={FieldMappingCount}",
             result.MatchedModelId ?? "(none)", result.ProposedModel is not null, result.Confidence, result.FieldMappings?.Count ?? 0);
+
+        await _audit.LogReceivedAsync(
+            "SchemaModelMatchingService", "MatchSchemaModel", correlationId, _llm.ProviderName,
+            new
+            {
+                matchedModelId = result.MatchedModelId,
+                proposedNew = result.ProposedModel is not null,
+                confidence = result.Confidence,
+                fieldMappingCount = result.FieldMappings?.Count ?? 0
+            },
+            sw.ElapsedMilliseconds, cancellationToken);
 
         return result;
     }

@@ -2,6 +2,7 @@ using Azure.Extensions.AspNetCore.Configuration.Secrets;
 using Azure.Identity;
 using DashboardAgents.Api.Services;
 using DashboardAgents.BlueprintAgent;
+using DashboardAgents.Core.Services;
 using DashboardAgents.Llm;
 using DashboardAgents.SchemaConnector;
 using DashboardAgents.TweakAgent;
@@ -88,6 +89,7 @@ try
                 client.DefaultRequestHeaders.Add("X-Service-Api-Key", opts.ServiceApiKey);
         }
     });
+    builder.Services.AddScoped<IAiBoundaryAuditPublisher, AiBoundaryAuditPublisher>();
 
     // ── LLM HTTP clients ─────────────────────────────────────────────────────
     builder.Services.AddHttpClient<OpenAiClient>(client =>

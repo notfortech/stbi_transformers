@@ -13,6 +13,8 @@ public sealed class OpenAiClient : ILlmClient
     private readonly OpenAiOptions _options;
     private readonly ILogger<OpenAiClient> _logger;
 
+    public string ProviderName => "OpenAI";
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

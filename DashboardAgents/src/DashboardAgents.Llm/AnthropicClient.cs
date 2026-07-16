@@ -16,6 +16,8 @@ public sealed class AnthropicClient : IAnthropicClient
     private readonly AnthropicOptions _options;
     private readonly ILogger<AnthropicClient> _logger;
 
+    public string ProviderName => "Anthropic";
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
