@@ -19,4 +19,7 @@ public sealed class TmdlAuthoringResult
 {
     [JsonPropertyName("files")] public List<TmdlFile> Files { get; set; } = new();
     [JsonPropertyName("reasoning")] public string Reasoning { get; set; } = "";
+
+    /// <summary>Populated by the controller after TmdlValidationService runs — never part of the LLM's own response contract.</summary>
+    [JsonPropertyName("validation")] public TmdlValidationResult? Validation { get; set; }
 }

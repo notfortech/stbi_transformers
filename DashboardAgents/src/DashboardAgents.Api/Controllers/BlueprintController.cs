@@ -12,6 +12,7 @@ public sealed class BlueprintController : ControllerBase
 {
     private readonly IBlueprintGenerationService _generationService;
     private readonly ITmdlAuthoringService _tmdlAuthoring;
+    private readonly ITmdlValidationService _tmdlValidation;
     private readonly ISchemaReaderFactory _readerFactory;
     private readonly IBlueprintStore _store;
     private readonly ILogger<BlueprintController> _logger;
@@ -19,12 +20,14 @@ public sealed class BlueprintController : ControllerBase
     public BlueprintController(
         IBlueprintGenerationService generationService,
         ITmdlAuthoringService tmdlAuthoring,
+        ITmdlValidationService tmdlValidation,
         ISchemaReaderFactory readerFactory,
         IBlueprintStore store,
         ILogger<BlueprintController> logger)
     {
         _generationService = generationService;
         _tmdlAuthoring = tmdlAuthoring;
+        _tmdlValidation = tmdlValidation;
         _readerFactory = readerFactory;
         _store = store;
         _logger = logger;
@@ -111,6 +114,21 @@ public sealed class BlueprintController : ControllerBase
         try
         {
             var result = await _tmdlAuthoring.AuthorAsync(blueprint, correlationId, cancellationToken);
+            result.Validation = _tmdlValidation.Validate(blueprint, result);
+
+            if (!result.Validation.IsValid)
+            {
+                _logger.LogWarning(
+                    "TMDL authoring for blueprint {BlueprintId} failed deterministic validation: {Violations}",
+                    blueprintId, string.Join(" | ", result.Validation.Violations));
+                return UnprocessableEntity(new
+                {
+                    message = "Authored TMDL failed deterministic validation.",
+                    violations = result.Validation.Violations,
+                    files = result.Files
+                });
+            }
+
             return Ok(result);
         }
         catch (ArgumentException ex)
