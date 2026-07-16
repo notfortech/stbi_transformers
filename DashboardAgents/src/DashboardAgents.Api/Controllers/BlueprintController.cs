@@ -11,17 +11,20 @@ namespace DashboardAgents.Api.Controllers;
 public sealed class BlueprintController : ControllerBase
 {
     private readonly IBlueprintGenerationService _generationService;
+    private readonly ITmdlAuthoringService _tmdlAuthoring;
     private readonly ISchemaReaderFactory _readerFactory;
     private readonly IBlueprintStore _store;
     private readonly ILogger<BlueprintController> _logger;
 
     public BlueprintController(
         IBlueprintGenerationService generationService,
+        ITmdlAuthoringService tmdlAuthoring,
         ISchemaReaderFactory readerFactory,
         IBlueprintStore store,
         ILogger<BlueprintController> logger)
     {
         _generationService = generationService;
+        _tmdlAuthoring = tmdlAuthoring;
         _readerFactory = readerFactory;
         _store = store;
         _logger = logger;
@@ -82,6 +85,43 @@ public sealed class BlueprintController : ControllerBase
     {
         var blueprint = _store.Get(blueprintId);
         return blueprint is null ? NotFound() : Ok(blueprint);
+    }
+
+    /// <summary>
+    /// S7 — converts an already-generated blueprint into a TMDL semantic model definition
+    /// (database.tmdl, model.tmdl, relationships.tmdl, expressions.tmdl, cultures/en-US.tmdl,
+    /// tables/*.tmdl). Deliberately separate from generation: only an already-approved blueprint
+    /// should reach this step. Output is proposed, not validated or deployed — see S8.
+    /// </summary>
+    [HttpPost("{blueprintId}/author-tmdl")]
+    [ProducesResponseType(typeof(TmdlAuthoringResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(502)]
+    public async Task<IActionResult> AuthorTmdl(string blueprintId, CancellationToken cancellationToken)
+    {
+        var blueprint = _store.Get(blueprintId);
+        if (blueprint is null)
+            return NotFound($"No blueprint found with id '{blueprintId}'. Generate one first via POST /api/blueprint/generate.");
+
+        var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
+            ? headerValue.ToString()
+            : Guid.NewGuid().ToString();
+
+        try
+        {
+            var result = await _tmdlAuthoring.AuthorAsync(blueprint, correlationId, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (BlueprintParseException ex)
+        {
+            _logger.LogError(ex, "TMDL authoring failed for blueprint {BlueprintId}", blueprintId);
+            return Problem(title: "TMDL authoring failed", detail: ex.Message, statusCode: 502);
+        }
     }
 
     private async Task<IActionResult> GenerateInternal(BlueprintGenerationOptions options, CancellationToken cancellationToken)
