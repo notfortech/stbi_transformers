@@ -135,9 +135,12 @@ public sealed class TmdlAuthoringService : ITmdlAuthoringService
         - "model.tmdl" — lists every table (ref table <Name>), every relationship-bearing model
           setting, `culture: en-US`, and `annotation`s for query-ordering; does not itself define
           columns/measures.
-        - "relationships.tmdl" — one `relationship <guid>` block per Blueprint relationship, using
-          `fromColumn: '<Table>'[<Column>]` / `toColumn: '<Table>'[<Column>]` syntax and the
+        - "relationships.tmdl" — one `relationship <name>` block per Blueprint relationship, using
+          dotted `fromColumn: <Table>.<Column>` / `toColumn: <Table>.<Column>` syntax (NOT
+          bracket notation — that's DAX, not TMDL relationship syntax) and the
           cardinality/crossFilteringBehavior implied by the blueprint's `cardinality`/`direction`.
+          Example: `relationship Fact_Orders_CustomerId_Dim_Customer` then indented
+          `fromColumn: Fact_Orders.CustomerId` / `toColumn: Dim_Customer.CustomerId`.
         - "expressions.tmdl" — shared M query parameters only if the blueprint's data sources need
           one (e.g. a source-file-path parameter); otherwise an empty/minimal file.
         - "cultures/en-US.tmdl" — `linguisticMetadata` block giving each table/column/measure a
@@ -152,8 +155,11 @@ public sealed class TmdlAuthoringService : ITmdlAuthoringService
           not authored here.
         - "tables/_Measures.tmdl" — one file holding every measure as a `measure '<Name>' =
           <dax>` block with `formatString` set from the blueprint's `format`, and
-          `displayFolder` from the blueprint's `display_folder`. Does not itself have a
-          `partition` (it's a measures-only table with no rows of its own).
+          `displayFolder` from the blueprint's `display_folder`. Being a measures-only table
+          with no real rows, it still needs exactly one placeholder `column BlankColumn` (with
+          `isHidden`, `formatString: 0`, `summarizeBy: none`, `sourceColumn: Value`) and a
+          `partition _Measures = calculated` block with `source = {BLANK()}` — this is the
+          standard Power BI convention for a measures-only table, not something to omit.
 
         Column-authoring rule for dimension tables: the blueprint only gives you name, type,
         key_columns, and hierarchies for each dimension table — never a full column list (unlike
