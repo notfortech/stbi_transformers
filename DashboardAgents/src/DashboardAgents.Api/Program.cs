@@ -105,11 +105,11 @@ try
     });
     builder.Services.AddHttpClient<AnthropicClient>(client =>
     {
-        // Bumped alongside the MaxTokens increase (8000 -> 16000, see AnthropicOptions.cs) — a
+        // Bumped alongside the MaxTokens increase (16000 -> 32000, see AnthropicOptions.cs) — a
         // larger token budget needs proportionally more generation time. koru-main's own outbound
-        // budget (ReportDesigner:TimeoutSeconds, currently 210s) also needs to stay comfortably
-        // above this if/when this service is called through koru-main rather than directly.
-        client.Timeout = TimeSpan.FromMinutes(4);
+        // budget (ReportDesigner:TimeoutSeconds, currently 210s) needs raising too if/when this
+        // service is called through koru-main rather than directly, to stay comfortably above this.
+        client.Timeout = TimeSpan.FromMinutes(5);
     });
 
     // Resolve ILlmClient: Anthropic by default now (OpenAI's org hit its TPM rate limit in
