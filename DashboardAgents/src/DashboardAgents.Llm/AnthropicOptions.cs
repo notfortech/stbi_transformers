@@ -11,11 +11,12 @@ public sealed class AnthropicOptions
 
     /// <summary>
     /// Confirmed via production diagnostics (2026-07-17): blueprint generation was hitting this
-    /// cap with StopReason=max_tokens and zero characters of actual text output — the model's
-    /// response contained a single non-text content block (consistent with internal reasoning)
-    /// that alone exhausted the entire 8000-token budget before any JSON could be emitted.
-    /// Doubled as a first step; raise further via ANTHROPIC_MAX_TOKENS if StopReason=max_tokens
-    /// still shows up in AnthropicClient's per-call log line.
+    /// cap with StopReason=max_tokens, TextLength=0, and BlockTypes=thinking — claude-sonnet-5
+    /// defaults to adaptive extended thinking when the request omits `thinking` entirely, and a
+    /// single "thinking" content block consumed the whole MaxTokens budget before any JSON output
+    /// was emitted, at both 8000 and 16000. Raising MaxTokens alone does not fix this (a bigger
+    /// budget just gets consumed by more thinking) — the real fix is AnthropicClient explicitly
+    /// sending `thinking: {"type": "disabled"}`. Left at 16000 as headroom for actual JSON output.
     /// </summary>
     public int MaxTokens { get; set; } = 16000;
 
