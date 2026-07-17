@@ -75,8 +75,9 @@ public sealed class AnthropicClient : IAnthropicClient
         // failures, since it's cheap and the two causes are otherwise indistinguishable from the
         // caller's side.
         _logger.LogInformation(
-            "Anthropic response received. StopReason={StopReason} ContentBlocks={ContentBlocks} TextLength={TextLength}",
-            parsed.StopReason ?? "(none)", parsed.Content.Count, text.Length);
+            "Anthropic response received. StopReason={StopReason} ContentBlocks={ContentBlocks} TextLength={TextLength} BlockTypes={BlockTypes}",
+            parsed.StopReason ?? "(none)", parsed.Content.Count, text.Length,
+            string.Join(",", parsed.Content.Select(c => c.Type)));
 
         return text;
     }
