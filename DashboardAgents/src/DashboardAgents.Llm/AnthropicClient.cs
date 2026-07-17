@@ -64,9 +64,21 @@ public sealed class AnthropicClient : IAnthropicClient
         var parsed = JsonSerializer.Deserialize<AnthropicResponse>(body, JsonOpts)
             ?? throw new LlmProviderException("Anthropic returned an unparseable response.");
 
-        return string.Join("\n", parsed.Content
+        var text = string.Join("\n", parsed.Content
             .Where(c => c.Type == "text")
             .Select(c => c.Text));
+
+        // StopReason is the single most useful signal for diagnosing a downstream JSON-parse
+        // failure: "max_tokens" means the response was cut off mid-generation (raise MaxTokens),
+        // vs "end_turn" meaning the model completed normally but produced something unparseable
+        // (a prompt/formatting problem, not a length problem). Logged on every call, not just
+        // failures, since it's cheap and the two causes are otherwise indistinguishable from the
+        // caller's side.
+        _logger.LogInformation(
+            "Anthropic response received. StopReason={StopReason} ContentBlocks={ContentBlocks} TextLength={TextLength}",
+            parsed.StopReason ?? "(none)", parsed.Content.Count, text.Length);
+
+        return text;
     }
 
     private sealed class AnthropicRequest
@@ -86,6 +98,7 @@ public sealed class AnthropicClient : IAnthropicClient
     private sealed class AnthropicResponse
     {
         public List<AnthropicContentBlock> Content { get; set; } = new();
+        public string? StopReason { get; set; }
     }
 
     private sealed class AnthropicContentBlock

@@ -72,9 +72,36 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
         }
         sw.Stop();
 
-        using var doc = JsonExtraction.ExtractJsonDocument(rawResponse);
-        var blueprint = JsonSerializer.Deserialize<Blueprint>(doc.RootElement.GetRawText(), JsonOptions)
-            ?? throw new BlueprintParseException("Deserialized blueprint was null.");
+        Blueprint blueprint;
+        try
+        {
+            using var doc = JsonExtraction.ExtractJsonDocument(rawResponse);
+            blueprint = JsonSerializer.Deserialize<Blueprint>(doc.RootElement.GetRawText(), JsonOptions)
+                ?? throw new BlueprintParseException("Deserialized blueprint was null.");
+        }
+        catch (BlueprintParseException ex)
+        {
+            // This previously threw straight out of GenerateAsync with no diagnostic beyond the
+            // generic "did not contain a recognizable JSON object" message, and no audit record —
+            // the raw response was never logged anywhere, so every prior occurrence was
+            // undiagnosable after the fact. Logging a capped preview here (this is the LLM's own
+            // generated blueprint text, not client data — same trust level as everything else in
+            // this audit trail) turns the next occurrence into an actual diagnosis instead of a
+            // repeat of the same open question.
+            const int previewLength = 1500;
+            var preview = rawResponse.Length <= previewLength
+                ? rawResponse
+                : rawResponse[..previewLength] + $"... [truncated, full length {rawResponse.Length}]";
+            _logger.LogError(ex,
+                "Blueprint JSON parse failed. RawResponseLength={Length} RawResponsePreview={Preview}",
+                rawResponse.Length, preview);
+
+            await _audit.LogFailedAsync(
+                "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+                sw.ElapsedMilliseconds, $"JSON parse failed: {ex.Message}", cancellationToken);
+
+            throw;
+        }
 
         var validation = BlueprintValidator.Validate(blueprint);
         if (!validation.IsValid)
