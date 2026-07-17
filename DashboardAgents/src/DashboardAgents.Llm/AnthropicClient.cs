@@ -44,7 +44,13 @@ public sealed class AnthropicClient : IAnthropicClient
             Messages = new List<AnthropicMessage>
             {
                 new() { Role = "user", Content = userMessage }
-            }
+            },
+            // Confirmed via production diagnostics (2026-07-17): omitting `thinking` entirely does
+            // NOT mean "thinking off" on claude-sonnet-5 — it defaults to adaptive thinking, and a
+            // single "thinking" content block consumed the entire MaxTokens budget (StopReason=
+            // max_tokens, TextLength=0) before any JSON output was ever emitted, even after MaxTokens
+            // was doubled to 16000. This model accepts an explicit disabled thinking mode; send it.
+            Thinking = new AnthropicThinkingConfig { Type = "disabled" }
         };
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _options.BaseUrl);
@@ -88,6 +94,12 @@ public sealed class AnthropicClient : IAnthropicClient
         public int MaxTokens { get; set; }
         public string System { get; set; } = "";
         public List<AnthropicMessage> Messages { get; set; } = new();
+        public AnthropicThinkingConfig? Thinking { get; set; }
+    }
+
+    private sealed class AnthropicThinkingConfig
+    {
+        public string Type { get; set; } = "disabled";
     }
 
     private sealed class AnthropicMessage
