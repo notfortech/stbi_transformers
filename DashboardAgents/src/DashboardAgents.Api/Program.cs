@@ -17,6 +17,12 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
 
+// Unmistakable canary: this exact string cannot exist in any binary built before this commit.
+// Purely diagnostic — added to cut through repeated ambiguity over whether a given restart is
+// actually serving the newly-deployed build or a stale worker process. Safe to remove once the
+// StopReason/RawResponsePreview logging (added alongside this) is confirmed live in production.
+Log.Information("BUILD_MARKER_STOPREASON_FIX_V1 — stbi_transformers starting");
+
 try
 {
     var builder = WebApplication.CreateBuilder(args);
