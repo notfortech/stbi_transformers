@@ -4,6 +4,14 @@ public sealed class AnthropicOptions
 {
     public const string SectionName = "Anthropic";
 
+    /// <summary>
+    /// Explicit switch — set via the ANTHROPIC_ENABLED App Setting. A provider is only ever
+    /// selected because this is true, never because an API key happens to be present (that
+    /// ambiguity is what previously caused stbi-blueprint-api to silently call Anthropic and hit
+    /// a billing 402 even though only OpenAI was intended).
+    /// </summary>
+    public bool Enabled { get; set; }
+
     /// <summary>Read from configuration/environment — never hard-code. See appsettings.json comments.</summary>
     public string ApiKey { get; set; } = "";
 

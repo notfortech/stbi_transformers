@@ -36,7 +36,9 @@ try
     var envOverrides = new Dictionary<string, string?>
     {
         ["OpenAI:ApiKey"]          = Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
+        ["OpenAI:Enabled"]         = Environment.GetEnvironmentVariable("OPENAI_ENABLED"),
         ["Anthropic:ApiKey"]       = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"),
+        ["Anthropic:Enabled"]      = Environment.GetEnvironmentVariable("ANTHROPIC_ENABLED"),
         ["Anthropic:MaxTokens"]    = Environment.GetEnvironmentVariable("ANTHROPIC_MAX_TOKENS"),
         ["Jwt:Key"]                = Environment.GetEnvironmentVariable("JWT_KEY"),
         ["Jwt:Issuer"]             = Environment.GetEnvironmentVariable("JWT_ISSUER"),
@@ -112,20 +114,34 @@ try
         client.Timeout = TimeSpan.FromMinutes(5);
     });
 
-    // Resolve ILlmClient: Anthropic by default now (OpenAI's org hit its TPM rate limit in
-    // production). Falls back to OpenAI only if no Anthropic key is configured, or if
-    // Llm:Provider is explicitly set to "openai".
+    // Resolve ILlmClient: the explicit Enabled flag decides which provider runs — never inferred
+    // from API-key presence. That ambiguity (provider chosen by whichever key happened to be
+    // configured, defaulting to Anthropic if both were present) previously let a leftover
+    // Llm:Provider=anthropic App Setting silently route stbi-blueprint-api to Anthropic and hit a
+    // billing 402, even though only OpenAI was intended. Set OPENAI_ENABLED=true or
+    // ANTHROPIC_ENABLED=true as an explicit Azure App Setting — Llm:Provider (LLM_PROVIDER) only
+    // matters as a tie-breaker if both are enabled at once.
     builder.Services.AddScoped<ILlmClient>(sp =>
     {
-        var cfg = sp.GetRequiredService<IConfiguration>();
-        var provider = cfg["Llm:Provider"]?.Trim().ToLowerInvariant() ?? "anthropic";
-        if (provider == "anthropic")
+        var openAiOpts = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
+        var anthropicOpts = sp.GetRequiredService<IOptions<AnthropicOptions>>().Value;
+
+        if (openAiOpts.Enabled && anthropicOpts.Enabled)
         {
-            var anthropicOpts = sp.GetRequiredService<IOptions<AnthropicOptions>>().Value;
-            if (!string.IsNullOrWhiteSpace(anthropicOpts.ApiKey))
-                return sp.GetRequiredService<AnthropicClient>();
+            var cfg = sp.GetRequiredService<IConfiguration>();
+            var tieBreak = cfg["Llm:Provider"]?.Trim().ToLowerInvariant();
+            if (tieBreak == "anthropic") return sp.GetRequiredService<AnthropicClient>();
+            if (tieBreak == "openai") return sp.GetRequiredService<OpenAiClient>();
+            throw new InvalidOperationException(
+                "Both OpenAI:Enabled and Anthropic:Enabled are true — set Llm:Provider " +
+                "(LLM_PROVIDER App Setting) to \"openai\" or \"anthropic\" to disambiguate.");
         }
-        return sp.GetRequiredService<OpenAiClient>();
+        if (openAiOpts.Enabled) return sp.GetRequiredService<OpenAiClient>();
+        if (anthropicOpts.Enabled) return sp.GetRequiredService<AnthropicClient>();
+
+        throw new InvalidOperationException(
+            "No LLM provider is enabled — set OPENAI_ENABLED=true or ANTHROPIC_ENABLED=true " +
+            "as an Azure App Setting.");
     });
 
     // ── Schema connector ─────────────────────────────────────────────────────
