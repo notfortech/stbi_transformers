@@ -11,17 +11,23 @@ namespace DashboardAgents.Api.Controllers;
 public sealed class BlueprintController : ControllerBase
 {
     private readonly IBlueprintGenerationService _generationService;
+    private readonly ITmdlAuthoringService _tmdlAuthoring;
+    private readonly ITmdlValidationService _tmdlValidation;
     private readonly ISchemaReaderFactory _readerFactory;
     private readonly IBlueprintStore _store;
     private readonly ILogger<BlueprintController> _logger;
 
     public BlueprintController(
         IBlueprintGenerationService generationService,
+        ITmdlAuthoringService tmdlAuthoring,
+        ITmdlValidationService tmdlValidation,
         ISchemaReaderFactory readerFactory,
         IBlueprintStore store,
         ILogger<BlueprintController> logger)
     {
         _generationService = generationService;
+        _tmdlAuthoring = tmdlAuthoring;
+        _tmdlValidation = tmdlValidation;
         _readerFactory = readerFactory;
         _store = store;
         _logger = logger;
@@ -82,6 +88,77 @@ public sealed class BlueprintController : ControllerBase
     {
         var blueprint = _store.Get(blueprintId);
         return blueprint is null ? NotFound() : Ok(blueprint);
+    }
+
+    /// <summary>
+    /// S7 — converts an already-generated blueprint into a TMDL semantic model definition
+    /// (database.tmdl, model.tmdl, relationships.tmdl, expressions.tmdl, cultures/en-US.tmdl,
+    /// tables/*.tmdl). Deliberately separate from generation: only an already-approved blueprint
+    /// should reach this step. Output is proposed, not validated or deployed — see S8.
+    /// </summary>
+    [HttpPost("{blueprintId}/author-tmdl")]
+    [ProducesResponseType(typeof(TmdlAuthoringResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(502)]
+    public async Task<IActionResult> AuthorTmdl(string blueprintId, CancellationToken cancellationToken)
+    {
+        var blueprint = _store.Get(blueprintId);
+        if (blueprint is null)
+            return NotFound($"No blueprint found with id '{blueprintId}'. Generate one first via POST /api/blueprint/generate.");
+
+        return await AuthorTmdlInternal(blueprint, cancellationToken);
+    }
+
+    /// <summary>
+    /// S9 — same as above, but the blueprint is sent directly in the request body instead of
+    /// looked up by id. Needed because koru-main's actual AI-assisted flow calls
+    /// PipelineController.Generate, which returns its Blueprint straight in the HTTP response
+    /// and never saves it to IBlueprintStore (unlike Generate/FromConnection above) — so
+    /// koru-main sends back the blueprint it already has rather than this service needing to
+    /// have persisted it first.
+    /// </summary>
+    [HttpPost("author-tmdl")]
+    [ProducesResponseType(typeof(TmdlAuthoringResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(422)]
+    [ProducesResponseType(502)]
+    public async Task<IActionResult> AuthorTmdlFromBody([FromBody] AuthorTmdlRequest request, CancellationToken cancellationToken)
+        => await AuthorTmdlInternal(request.Blueprint, cancellationToken);
+
+    private async Task<IActionResult> AuthorTmdlInternal(Blueprint blueprint, CancellationToken cancellationToken)
+    {
+        var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)
+            ? headerValue.ToString()
+            : Guid.NewGuid().ToString();
+
+        try
+        {
+            var result = await _tmdlAuthoring.AuthorAsync(blueprint, correlationId, cancellationToken);
+            result.Validation = _tmdlValidation.Validate(blueprint, result);
+
+            if (!result.Validation.IsValid)
+            {
+                _logger.LogWarning(
+                    "TMDL authoring for blueprint {BlueprintId} failed deterministic validation: {Violations}",
+                    blueprint.BlueprintId, string.Join(" | ", result.Validation.Violations));
+                // Same TmdlAuthoringResult shape as the 200 path (files/reasoning/validation) —
+                // callers deserialize one response type regardless of status code and just check
+                // validation.isValid, rather than needing a second shape for the failure case.
+                return UnprocessableEntity(result);
+            }
+
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (BlueprintParseException ex)
+        {
+            _logger.LogError(ex, "TMDL authoring failed for blueprint {BlueprintId}", blueprint.BlueprintId);
+            return Problem(title: "TMDL authoring failed", detail: ex.Message, statusCode: 502);
+        }
     }
 
     private async Task<IActionResult> GenerateInternal(BlueprintGenerationOptions options, CancellationToken cancellationToken)

@@ -144,6 +144,8 @@ try
     builder.Services.AddScoped<IColumnValidationService, ColumnValidationService>();
     builder.Services.AddScoped<IDesignMatchingService, DesignMatchingService>();
     builder.Services.AddScoped<IBlueprintGenerationService, BlueprintGenerationService>();
+    builder.Services.AddScoped<ITmdlAuthoringService, TmdlAuthoringService>();
+    builder.Services.AddSingleton<ITmdlValidationService, TmdlValidationService>();
     builder.Services.AddScoped<IUseCaseTweakService, UseCaseTweakService>();
     builder.Services.AddScoped<ISchemaModelMatchingService, SchemaModelMatchingService>();
 
