@@ -55,6 +55,17 @@ def profile_table(table: str, df: pd.DataFrame) -> list[ColumnProfile]:
 
         if _looks_like_identifier(name) and n > 0 and (distinct / n) > 0.9:
             role = "identifier"
+        elif pd.api.types.is_datetime64_any_dtype(series) or isinstance(
+            series.dtype, pd.PeriodDtype
+        ):
+            # Already a native date/datetime dtype (the normal case for a real Excel/SQL
+            # DATE column read via openpyxl). Classify directly as "date" rather than
+            # falling into the numeric check below: pd.to_numeric() silently succeeds on
+            # datetime64 (converting each value to epoch nanoseconds) instead of returning
+            # NaN, which previously made date columns pass the ">90% numeric" check and get
+            # misclassified as "numeric" — producing nonsensical KPIs like "Sum of OrderDate"
+            # (actually the sum of nanosecond timestamps).
+            role = "date"
         else:
             numeric = pd.to_numeric(series, errors="coerce")
             if numeric.notna().mean() > 0.9 and not _looks_like_identifier(name):
@@ -161,6 +172,9 @@ def build_report(
         kind = section.get("kind")
 
         if kind == "kpi_row":
+            # numeric_cols only ever contains columns profiled as role="numeric" — date
+            # columns are excluded upstream in profile_table(), so a "sum"/"average" of a
+            # date can no longer reach this loop at all.
             for col in numeric_cols[: section.get("max", 4)]:
                 series = pd.to_numeric(df[col], errors="coerce").dropna()
                 if series.empty:
@@ -177,25 +191,90 @@ def build_report(
                         "aggregation": agg,
                     })
 
+        elif kind == "date_kpis":
+            # Genuinely valid, date-appropriate measures — never a raw sum/average of a
+            # date value. Both are deterministic against the data itself (anchored to the
+            # column's own max date, not wall-clock "now"), so re-running against the same
+            # file always reproduces the same numbers.
+            for col in date_cols[: section.get("max", 1)]:
+                dates = pd.to_datetime(df[col], errors="coerce").dropna()
+                if dates.empty:
+                    continue
+                span_days = int((dates.max() - dates.min()).days)
+                kpis.append({
+                    "label": f"Data Span ({col})",
+                    "value": float(span_days),
+                    "column": col,
+                    "aggregation": "date range (days)",
+                })
+                window_start = dates.max() - pd.Timedelta(days=30)
+                recent_count = int((dates >= window_start).sum())
+                kpis.append({
+                    "label": f"Last 30 Days ({col})",
+                    "value": float(recent_count),
+                    "column": col,
+                    "aggregation": "trailing 30-day count",
+                })
+
         elif kind == "trend":
             if not date_cols or not numeric_cols:
                 warnings.append("No date+numeric column pair found; trend chart skipped.")
                 continue
-            date_col, value_col = date_cols[0], numeric_cols[0]
-            tmp = df.assign(
-                _d=pd.to_datetime(df[date_col], errors="coerce"),
-                _v=pd.to_numeric(df[value_col], errors="coerce"),
-            ).dropna(subset=["_d"])
-            monthly = tmp.set_index("_d").resample("MS")["_v"].sum().dropna()
-            if monthly.empty:
-                warnings.append(f'No usable rows to build a trend for "{value_col}" by "{date_col}".')
+            date_col = date_cols[0]
+            value_cols = numeric_cols[: section.get("max", 3)]
+            parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
+
+            monthly_by_col: dict[str, pd.Series] = {}
+            for value_col in value_cols:
+                tmp = pd.DataFrame({
+                    "_d": parsed_dates,
+                    "_v": pd.to_numeric(df[value_col], errors="coerce"),
+                }).dropna(subset=["_d"])
+                monthly = tmp.set_index("_d").resample("MS")["_v"].sum()
+                if monthly.notna().any():
+                    monthly_by_col[value_col] = monthly
+
+            if not monthly_by_col:
+                warnings.append(f'No usable rows to build a trend by "{date_col}".')
                 continue
+
+            # Align every series to the same set of months (union across all requested
+            # value columns) so multi-series charts don't silently misalign x-axis points —
+            # a month with no rows for a given measure is a real 0, not a gap.
+            all_months = sorted(set().union(*(m.index for m in monthly_by_col.values())))
+            title = f"{value_cols[0]} Trend" if len(monthly_by_col) == 1 else "Trend Comparison"
             charts.append({
                 "type": "line",
-                "title": f"{value_col} Trend",
-                "x": [d.strftime("%b %Y") for d in monthly.index],
-                "series": [{"name": value_col, "values": [round(float(v), 2) for v in monthly.values]}],
+                "title": title,
+                "x": [d.strftime("%b %Y") for d in all_months],
+                "series": [
+                    {
+                        "name": col,
+                        "values": [round(float(monthly.get(m, 0.0)), 2) for m in all_months],
+                    }
+                    for col, monthly in monthly_by_col.items()
+                ],
             })
+
+        elif kind == "category_counts":
+            # Record COUNT per category — distinct from "breakdown" below, which sums a
+            # numeric value per category. Useful even when the count and the summed value
+            # tell different stories (e.g. many small orders vs a few large ones).
+            if not categorical_cols:
+                warnings.append("No categorical column found; category count chart skipped.")
+                continue
+            for cat_col in categorical_cols[: section.get("max", 1)]:
+                counts = (
+                    df[cat_col].dropna().astype(str).value_counts().sort_values(ascending=False).head(10)
+                )
+                if counts.empty:
+                    continue
+                charts.append({
+                    "type": "bar",
+                    "title": f"Record Count by {cat_col}",
+                    "categories": [str(c) for c in counts.index],
+                    "series": [{"name": "Count", "values": [int(v) for v in counts.values]}],
+                })
 
         elif kind == "breakdown":
             if not categorical_cols or not numeric_cols:

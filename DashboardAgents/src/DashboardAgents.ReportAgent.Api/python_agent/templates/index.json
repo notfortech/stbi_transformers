@@ -4,7 +4,15 @@
     "file": "generic-overview.json",
     "name": "Generic Overview",
     "industry": null,
-    "description": "Numeric KPI cards, a trend line (if a date column exists), and category breakdowns (if categorical columns exist). Matches any connected dataset with at least one numeric column.",
+    "description": "Numeric KPI cards, date-range/activity KPIs, a multi-series trend line, category breakdowns by value, and record-count-by-category charts. Matches any connected dataset with at least one numeric column.",
     "requires": { "minNumeric": 1 }
+  },
+  {
+    "id": "dates-categories-overview",
+    "file": "dates-categories-overview.json",
+    "name": "Dates & Categories Overview",
+    "industry": null,
+    "description": "Fallback for datasets with no genuine numeric measure — date-range/activity KPIs and record-count-by-category charts only. Requires no numeric column, so it always matches after Generic Overview's requirement isn't met.",
+    "requires": {}
   }
 ]

@@ -1,0 +1,6 @@
+{
+  "sections": [
+    { "kind": "date_kpis", "max": 2 },
+    { "kind": "category_counts", "max": 2 }
+  ]
+}
