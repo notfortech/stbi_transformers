@@ -37,6 +37,7 @@ try
     {
         ["OpenAI:ApiKey"]          = Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
         ["Anthropic:ApiKey"]       = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"),
+        ["Anthropic:MaxTokens"]    = Environment.GetEnvironmentVariable("ANTHROPIC_MAX_TOKENS"),
         ["Jwt:Key"]                = Environment.GetEnvironmentVariable("JWT_KEY"),
         ["Jwt:Issuer"]             = Environment.GetEnvironmentVariable("JWT_ISSUER"),
         ["Jwt:Audience"]           = Environment.GetEnvironmentVariable("JWT_AUDIENCE"),
@@ -104,7 +105,11 @@ try
     });
     builder.Services.AddHttpClient<AnthropicClient>(client =>
     {
-        client.Timeout = TimeSpan.FromMinutes(3);
+        // Bumped alongside the MaxTokens increase (8000 -> 16000, see AnthropicOptions.cs) — a
+        // larger token budget needs proportionally more generation time. koru-main's own outbound
+        // budget (ReportDesigner:TimeoutSeconds, currently 210s) also needs to stay comfortably
+        // above this if/when this service is called through koru-main rather than directly.
+        client.Timeout = TimeSpan.FromMinutes(4);
     });
 
     // Resolve ILlmClient: Anthropic by default now (OpenAI's org hit its TPM rate limit in
