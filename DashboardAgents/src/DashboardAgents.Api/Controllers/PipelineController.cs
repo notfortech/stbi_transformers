@@ -339,6 +339,11 @@ public sealed class PipelineController : ControllerBase
             _logger.LogError(ex, "Blueprint parse failed");
             return Problem(title: "Blueprint generation failed", detail: ex.Message, statusCode: 502);
         }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Blueprint generation unavailable: {Message}", ex.Message);
+            return Problem(title: "Blueprint generation unavailable", detail: ex.Message, statusCode: 422);
+        }
         sw.Stop();
 
         // Build template match from the selected design
