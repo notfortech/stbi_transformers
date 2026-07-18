@@ -15,6 +15,15 @@ public sealed class BlueprintGenerationOptions
     public string RefreshCadence { get; set; } = "Daily";
     public string? BusinessGoal { get; set; }
     public string? KnowledgePack { get; set; }
+
+    /// <summary>
+    /// Number of source tables the schema was introspected/extracted from, when known (schema
+    /// mode only — left null for "requirements" mode or pasted schema text with no structured
+    /// table count). Lets BlueprintValidator scale its star-schema minimums down for genuinely
+    /// single-table inputs, where e.g. 2 distinct fact tables would imply 2 business processes
+    /// that a single flat table doesn't contain.
+    /// </summary>
+    public int? SourceTableCount { get; set; }
 }
 
 /// <summary>Request to introspect a live database and turn it directly into a blueprint.</summary>

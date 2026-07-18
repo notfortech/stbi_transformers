@@ -111,7 +111,7 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
             throw;
         }
 
-        var validation = BlueprintValidator.Validate(blueprint);
+        var validation = BlueprintValidator.Validate(blueprint, options.SourceTableCount);
         if (!validation.IsValid)
         {
             _logger.LogWarning("Generated blueprint failed validation with {Count} violations: {Violations}",

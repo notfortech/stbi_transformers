@@ -76,6 +76,7 @@ public sealed class BlueprintController : ControllerBase
         var options = request.Options;
         options.Mode = "schema";
         options.SchemaText = SchemaTextFormatter.Format(snapshot);
+        options.SourceTableCount = snapshot.Tables.Count;
 
         return await GenerateInternal(options, cancellationToken);
     }

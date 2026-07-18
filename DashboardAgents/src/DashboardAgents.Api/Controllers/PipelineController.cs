@@ -308,7 +308,8 @@ public sealed class PipelineController : ControllerBase
             BusinessGoal = businessGoal,
             Requirements = request?.BusinessRequirements,
             IndustryExplicit = request?.Industry ?? selectedDesign?.Industry,
-            KnowledgePack = request?.KnowledgePack
+            KnowledgePack = request?.KnowledgePack,
+            SourceTableCount = session.Schema.Tables.Count
         };
 
         var correlationId = Request.Headers.TryGetValue("X-Correlation-Id", out var headerValue) && !string.IsNullOrWhiteSpace(headerValue)

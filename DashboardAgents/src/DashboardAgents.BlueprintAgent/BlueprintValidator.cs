@@ -24,18 +24,32 @@ public static class BlueprintValidator
     private const int MinExecutiveQuestions = 8;
     private const int RequiredGateCount = 9;
 
-    public static BlueprintValidationResult Validate(Blueprint blueprint)
+    // A single source table can't legitimately decompose into 2 fact tables (that implies 2
+    // distinct business processes/grains), so the full star-schema minimums above only apply
+    // when the input has 2+ source tables or table count is unknown (requirements mode / pasted
+    // schema text). For a genuinely single-table input, one fact table plus whatever dimensions
+    // (e.g. category, date) can be derived from its columns is the realistic ceiling.
+    private const int SingleTableMinFactTables = 1;
+    private const int SingleTableMinDimensionTables = 2;
+    private const int SingleTableMinRelationships = 2;
+
+    public static BlueprintValidationResult Validate(Blueprint blueprint, int? sourceTableCount = null)
     {
         var result = new BlueprintValidationResult();
 
-        if (blueprint.DataModel.FactTables.Count < MinFactTables)
-            result.Violations.Add($"data_model.fact_tables must have at least {MinFactTables} entries (found {blueprint.DataModel.FactTables.Count}).");
+        var isSingleTableInput = sourceTableCount == 1;
+        var minFactTables = isSingleTableInput ? SingleTableMinFactTables : MinFactTables;
+        var minDimensionTables = isSingleTableInput ? SingleTableMinDimensionTables : MinDimensionTables;
+        var minRelationships = isSingleTableInput ? SingleTableMinRelationships : MinRelationships;
 
-        if (blueprint.DataModel.DimensionTables.Count < MinDimensionTables)
-            result.Violations.Add($"data_model.dimension_tables must have at least {MinDimensionTables} entries (found {blueprint.DataModel.DimensionTables.Count}).");
+        if (blueprint.DataModel.FactTables.Count < minFactTables)
+            result.Violations.Add($"data_model.fact_tables must have at least {minFactTables} entries (found {blueprint.DataModel.FactTables.Count}).");
 
-        if (blueprint.DataModel.Relationships.Count < MinRelationships)
-            result.Violations.Add($"data_model.relationships must have at least {MinRelationships} entries (found {blueprint.DataModel.Relationships.Count}).");
+        if (blueprint.DataModel.DimensionTables.Count < minDimensionTables)
+            result.Violations.Add($"data_model.dimension_tables must have at least {minDimensionTables} entries (found {blueprint.DataModel.DimensionTables.Count}).");
+
+        if (blueprint.DataModel.Relationships.Count < minRelationships)
+            result.Violations.Add($"data_model.relationships must have at least {minRelationships} entries (found {blueprint.DataModel.Relationships.Count}).");
 
         if (string.IsNullOrWhiteSpace(blueprint.DataModel.DateTable.Name))
             result.Violations.Add("data_model.date_table is missing.");
