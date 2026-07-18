@@ -178,6 +178,10 @@ public sealed class GenerateRequest
     public string? BusinessRequirements { get; set; }
     public string? Industry { get; set; }
     public string? KnowledgePack { get; set; }
+
+    /// <summary>Optional per-request override: "anthropic" | "openai". Falls back to the
+    /// server's OpenAI:Enabled/Anthropic:Enabled configuration when omitted.</summary>
+    public string? AiProvider { get; set; }
 }
 
 public sealed class GenerateResponse

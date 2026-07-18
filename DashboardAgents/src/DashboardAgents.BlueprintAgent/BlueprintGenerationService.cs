@@ -9,8 +9,13 @@ namespace DashboardAgents.BlueprintAgent;
 
 public interface IBlueprintGenerationService
 {
+    // aiProviderOverride is deliberately the LAST parameter (after cancellationToken, which was
+    // already here) so existing 3-positional-argument call sites (options, correlationId,
+    // cancellationToken) keep compiling unchanged — only a caller that wants an override needs
+    // to add a 4th argument.
     Task<Blueprint> GenerateAsync(
-        BlueprintGenerationOptions options, string correlationId, CancellationToken cancellationToken = default);
+        BlueprintGenerationOptions options, string correlationId, CancellationToken cancellationToken = default,
+        string? aiProviderOverride = null);
 }
 
 /// <summary>
@@ -25,25 +30,28 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly ILlmClient _llm;
+    private readonly ILlmClientFactory _llmFactory;
     private readonly ILogger<BlueprintGenerationService> _logger;
     private readonly IAiBoundaryAuditPublisher _audit;
 
-    public BlueprintGenerationService(ILlmClient llm, ILogger<BlueprintGenerationService> logger, IAiBoundaryAuditPublisher audit)
+    public BlueprintGenerationService(ILlmClientFactory llmFactory, ILogger<BlueprintGenerationService> logger, IAiBoundaryAuditPublisher audit)
     {
-        _llm = llm;
+        _llmFactory = llmFactory;
         _logger = logger;
         _audit = audit;
     }
 
     public async Task<Blueprint> GenerateAsync(
-        BlueprintGenerationOptions options, string correlationId, CancellationToken cancellationToken = default)
+        BlueprintGenerationOptions options, string correlationId, CancellationToken cancellationToken = default,
+        string? aiProviderOverride = null)
     {
         if (options.Mode == "requirements" && string.IsNullOrWhiteSpace(options.Requirements)
             || options.Mode == "schema" && string.IsNullOrWhiteSpace(options.SchemaText))
         {
             throw new ArgumentException("Business requirements or a dataset schema must be provided before generating a blueprint.");
         }
+
+        var llm = _llmFactory.Resolve(aiProviderOverride);
 
         var systemPrompt = SystemPromptBuilder.Build(options);
         var userPrompt = UserPromptBuilder.Build(options);
@@ -52,7 +60,7 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
             options.Mode, options.IndustryExplicit ?? "(auto-detect)");
 
         await _audit.LogSentAsync(
-            "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+            "BlueprintGenerator", "GenerateBlueprint", correlationId, llm.ProviderName,
             new { mode = options.Mode, industryOverride = options.IndustryExplicit ?? "(auto-detect)" },
             cancellationToken);
 
@@ -60,13 +68,13 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
         string rawResponse;
         try
         {
-            rawResponse = await _llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
+            rawResponse = await llm.CompleteAsync(systemPrompt, userPrompt, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
             await _audit.LogFailedAsync(
-                "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+                "BlueprintGenerator", "GenerateBlueprint", correlationId, llm.ProviderName,
                 sw.ElapsedMilliseconds, $"LLM call failed: {ex.GetType().Name}", cancellationToken);
             throw;
         }
@@ -97,7 +105,7 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
                 rawResponse.Length, preview);
 
             await _audit.LogFailedAsync(
-                "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+                "BlueprintGenerator", "GenerateBlueprint", correlationId, llm.ProviderName,
                 sw.ElapsedMilliseconds, $"JSON parse failed: {ex.Message}", cancellationToken);
 
             throw;
@@ -110,7 +118,7 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
                 validation.Violations.Count, string.Join(" | ", validation.Violations));
 
             await _audit.LogFailedAsync(
-                "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+                "BlueprintGenerator", "GenerateBlueprint", correlationId, llm.ProviderName,
                 sw.ElapsedMilliseconds, $"Blueprint failed validation: {validation.Violations.Count} violation(s)",
                 cancellationToken);
 
@@ -122,7 +130,7 @@ public sealed class BlueprintGenerationService : IBlueprintGenerationService
         blueprint.BlueprintId = Guid.NewGuid().ToString("N");
 
         await _audit.LogReceivedAsync(
-            "BlueprintGenerator", "GenerateBlueprint", correlationId, _llm.ProviderName,
+            "BlueprintGenerator", "GenerateBlueprint", correlationId, llm.ProviderName,
             new { blueprintId = blueprint.BlueprintId }, sw.ElapsedMilliseconds, cancellationToken);
 
         return blueprint;
