@@ -319,7 +319,8 @@ public sealed class PipelineController : ControllerBase
         Blueprint blueprint;
         try
         {
-            blueprint = await _blueprintGeneration.GenerateAsync(options, correlationId, cancellationToken);
+            blueprint = await _blueprintGeneration.GenerateAsync(
+                options, correlationId, cancellationToken, aiProviderOverride: request?.AiProvider);
         }
         catch (ArgumentException ex)
         {

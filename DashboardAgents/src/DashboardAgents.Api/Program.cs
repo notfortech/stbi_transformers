@@ -114,35 +114,16 @@ try
         client.Timeout = TimeSpan.FromMinutes(5);
     });
 
-    // Resolve ILlmClient: the explicit Enabled flag decides which provider runs — never inferred
-    // from API-key presence. That ambiguity (provider chosen by whichever key happened to be
-    // configured, defaulting to Anthropic if both were present) previously let a leftover
-    // Llm:Provider=anthropic App Setting silently route stbi-blueprint-api to Anthropic and hit a
-    // billing 402, even though only OpenAI was intended. Set OPENAI_ENABLED=true or
-    // ANTHROPIC_ENABLED=true as an explicit Azure App Setting — Llm:Provider (LLM_PROVIDER) only
-    // matters as a tie-breaker if both are enabled at once.
-    builder.Services.AddScoped<ILlmClient>(sp =>
-    {
-        var openAiOpts = sp.GetRequiredService<IOptions<OpenAiOptions>>().Value;
-        var anthropicOpts = sp.GetRequiredService<IOptions<AnthropicOptions>>().Value;
+    // ILlmClientFactory owns provider selection now (see LlmClientFactory.cs) — the explicit
+    // Enabled flag still decides which providers are allowed to run at all, but callers that
+    // need a per-request override (e.g. PipelineController.Generate's aiProvider field) resolve
+    // through the factory instead of a single scope-wide ILlmClient.
+    builder.Services.AddScoped<ILlmClientFactory, LlmClientFactory>();
 
-        if (openAiOpts.Enabled && anthropicOpts.Enabled)
-        {
-            var cfg = sp.GetRequiredService<IConfiguration>();
-            var tieBreak = cfg["Llm:Provider"]?.Trim().ToLowerInvariant();
-            if (tieBreak == "anthropic") return sp.GetRequiredService<AnthropicClient>();
-            if (tieBreak == "openai") return sp.GetRequiredService<OpenAiClient>();
-            throw new InvalidOperationException(
-                "Both OpenAI:Enabled and Anthropic:Enabled are true — set Llm:Provider " +
-                "(LLM_PROVIDER App Setting) to \"openai\" or \"anthropic\" to disambiguate.");
-        }
-        if (openAiOpts.Enabled) return sp.GetRequiredService<OpenAiClient>();
-        if (anthropicOpts.Enabled) return sp.GetRequiredService<AnthropicClient>();
-
-        throw new InvalidOperationException(
-            "No LLM provider is enabled — set OPENAI_ENABLED=true or ANTHROPIC_ENABLED=true " +
-            "as an Azure App Setting.");
-    });
+    // ILlmClient is kept registered too, delegating to the factory's default (no-override)
+    // resolution, so existing direct-injection callers that don't need a per-request override
+    // (TmdlAuthoringService, SchemaModelMatchingService, UseCaseTweakService) are unaffected.
+    builder.Services.AddScoped<ILlmClient>(sp => sp.GetRequiredService<ILlmClientFactory>().Resolve());
 
     // ── Schema connector ─────────────────────────────────────────────────────
     builder.Services.AddScoped<IDbSchemaReader, SqlServerSchemaReader>();
