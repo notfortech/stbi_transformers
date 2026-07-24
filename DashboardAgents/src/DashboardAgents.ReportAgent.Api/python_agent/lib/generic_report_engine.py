@@ -25,6 +25,21 @@ import pandas as pd
 
 IDENTIFIER_HINTS = ("id", "key", "code", "uuid", "guid")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_CURRENCY_HINTS = ("amount", "revenue", "price", "cost", "total", "sales", "spend", "budget", "expense", "income", "profit", "value", "fee")
+_PERCENT_HINTS = ("percent", "pct", "rate", "ratio", "margin")
+_MAX_CHART_CATEGORIES = 10
+
+
+def _infer_unit(column: str) -> str:
+    """Best-effort display-unit hint from a column name — "currency" | "percent" | "count".
+    Purely a frontend formatting hint; never affects the computed value itself, and a wrong
+    guess degrades to plain-number display rather than breaking anything."""
+    name = column.lower()
+    if any(h in name for h in _PERCENT_HINTS):
+        return "percent"
+    if any(h in name for h in _CURRENCY_HINTS):
+        return "currency"
+    return "count"
 
 
 @dataclass
@@ -180,7 +195,32 @@ def build_report(
                 if series.empty:
                     continue
                 agg_fns = {"sum": series.sum, "average": series.mean, "min": series.min, "max": series.max}
+                unit = _infer_unit(col)
                 for agg in section.get("agg", ["sum"]):
+                    if agg == "share":
+                        # "Top <dimension> share of <fact>" — the leading category's
+                        # contribution as a % of the column's total. Needs a categorical
+                        # column to group by; silently skipped (not a warning) when none
+                        # exists, since "share" is an opt-in agg some templates won't use.
+                        if not categorical_cols:
+                            continue
+                        cat_col = categorical_cols[0]
+                        grouped = (
+                            df.assign(_v=pd.to_numeric(df[col], errors="coerce"))
+                            .groupby(cat_col)["_v"].sum().dropna()
+                        )
+                        total = float(grouped.sum())
+                        if grouped.empty or total == 0:
+                            continue
+                        top_share = round(float(grouped.max()) / total * 100, 1)
+                        kpis.append({
+                            "label": f"Top {cat_col} Share of {col}",
+                            "value": top_share,
+                            "column": col,
+                            "aggregation": "share",
+                            "unit": "percent",
+                        })
+                        continue
                     fn = agg_fns.get(agg)
                     if fn is None:
                         continue
@@ -189,6 +229,7 @@ def build_report(
                         "value": round(float(fn()), 2),
                         "column": col,
                         "aggregation": agg,
+                        "unit": unit,
                     })
 
         elif kind == "date_kpis":
@@ -206,6 +247,7 @@ def build_report(
                     "value": float(span_days),
                     "column": col,
                     "aggregation": "date range (days)",
+                    "unit": "days",
                 })
                 window_start = dates.max() - pd.Timedelta(days=30)
                 recent_count = int((dates >= window_start).sum())
@@ -214,7 +256,66 @@ def build_report(
                     "value": float(recent_count),
                     "column": col,
                     "aggregation": "trailing 30-day count",
+                    "unit": "count",
                 })
+
+        elif kind == "period_comparison":
+            # Month-over-month and year-over-year % change for numeric measures against
+            # the primary date column. Anchored to the data's own max date, never wall-
+            # clock "now" — the same file always reproduces the same numbers. The bucket
+            # containing the max date itself is treated as a possibly-partial month (data
+            # collection likely stopped mid-month) and is never used as "the latest full
+            # month" — the month before it is, so MoM/YoY never compares a partial month
+            # against a full one.
+            if not date_cols or not numeric_cols:
+                warnings.append("No date+numeric column pair found; period comparison skipped.")
+                continue
+            date_col = date_cols[0]
+            value_cols = numeric_cols[: section.get("max", 2)]
+            parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
+
+            for value_col in value_cols:
+                tmp = pd.DataFrame({
+                    "_d": parsed_dates,
+                    "_v": pd.to_numeric(df[value_col], errors="coerce"),
+                }).dropna(subset=["_d"])
+                if tmp.empty:
+                    continue
+                monthly = tmp.set_index("_d").resample("MS")["_v"].sum()
+                max_date = tmp["_d"].max()
+                last_full_month = pd.Timestamp(max_date.year, max_date.month, 1) - pd.DateOffset(months=1)
+                if last_full_month not in monthly.index:
+                    warnings.append(f'Not enough history to compute a period comparison for "{value_col}".')
+                    continue
+                current_value = float(monthly.loc[last_full_month])
+                unit = _infer_unit(value_col)
+
+                mom_month = last_full_month - pd.DateOffset(months=1)
+                mom_change = None
+                if mom_month in monthly.index:
+                    prior = float(monthly.loc[mom_month])
+                    mom_change = round((current_value - prior) / prior * 100, 2) if prior != 0 else None
+                kpis.append({
+                    "label": f"{value_col} — MoM Change",
+                    "value": round(current_value, 2),
+                    "change": mom_change,
+                    "column": value_col,
+                    "aggregation": "month-over-month",
+                    "unit": unit,
+                })
+
+                yoy_month = last_full_month - pd.DateOffset(years=1)
+                if yoy_month in monthly.index:
+                    prior = float(monthly.loc[yoy_month])
+                    yoy_change = round((current_value - prior) / prior * 100, 2) if prior != 0 else None
+                    kpis.append({
+                        "label": f"{value_col} — YoY Change",
+                        "value": round(current_value, 2),
+                        "change": yoy_change,
+                        "column": value_col,
+                        "aggregation": "year-over-year",
+                        "unit": unit,
+                    })
 
         elif kind == "trend":
             if not date_cols or not numeric_cols:
@@ -251,6 +352,7 @@ def build_report(
                     {
                         "name": col,
                         "values": [round(float(monthly.get(m, 0.0)), 2) for m in all_months],
+                        "unit": _infer_unit(col),
                     }
                     for col, monthly in monthly_by_col.items()
                 ],
@@ -264,16 +366,23 @@ def build_report(
                 warnings.append("No categorical column found; category count chart skipped.")
                 continue
             for cat_col in categorical_cols[: section.get("max", 1)]:
-                counts = (
-                    df[cat_col].dropna().astype(str).value_counts().sort_values(ascending=False).head(10)
-                )
-                if counts.empty:
+                counts_full = df[cat_col].dropna().astype(str).value_counts().sort_values(ascending=False)
+                if counts_full.empty:
                     continue
+                counts = counts_full.head(_MAX_CHART_CATEGORIES)
+                if len(counts_full) > _MAX_CHART_CATEGORIES:
+                    folded = len(counts_full) - _MAX_CHART_CATEGORIES
+                    other_count = int(counts_full.iloc[_MAX_CHART_CATEGORIES:].sum())
+                    counts = pd.concat([counts, pd.Series({"Other": other_count})])
+                    warnings.append(
+                        f'"{cat_col}" has {len(counts_full)} distinct values — folded the smallest '
+                        f'{folded} into "Other" so the chart stays readable.'
+                    )
                 charts.append({
                     "type": "bar",
                     "title": f"Record Count by {cat_col}",
                     "categories": [str(c) for c in counts.index],
-                    "series": [{"name": "Count", "values": [int(v) for v in counts.values]}],
+                    "series": [{"name": "Count", "values": [int(v) for v in counts.values], "unit": "count"}],
                 })
 
         elif kind == "breakdown":
@@ -281,21 +390,35 @@ def build_report(
                 warnings.append("No category+numeric column pair found; breakdown chart skipped.")
                 continue
             value_col = numeric_cols[0]
+            show_percent = section.get("showPercent", False)
             for cat_col in categorical_cols[: section.get("max", 2)]:
-                grouped = (
+                grouped_full = (
                     df.assign(_v=pd.to_numeric(df[value_col], errors="coerce"))
                     .groupby(cat_col)["_v"].sum()
-                    .sort_values(ascending=False)
-                    .head(10)
                     .dropna()
+                    .sort_values(ascending=False)
                 )
-                if grouped.empty:
+                if grouped_full.empty:
                     continue
+                total = float(grouped_full.sum())
+                grouped = grouped_full.head(_MAX_CHART_CATEGORIES)
+                if len(grouped_full) > _MAX_CHART_CATEGORIES:
+                    folded = len(grouped_full) - _MAX_CHART_CATEGORIES
+                    other_sum = float(grouped_full.iloc[_MAX_CHART_CATEGORIES:].sum())
+                    grouped = pd.concat([grouped, pd.Series({"Other": other_sum})])
+                    warnings.append(
+                        f'"{cat_col}" has {len(grouped_full)} categories — folded the smallest '
+                        f'{folded} into "Other" so the chart stays readable.'
+                    )
+                series_values = [round(float(v), 2) for v in grouped.values]
+                series: dict = {"name": value_col, "values": series_values, "unit": _infer_unit(value_col)}
+                if show_percent and total:
+                    series["percentOfTotal"] = [round(v / total * 100, 1) for v in series_values]
                 charts.append({
                     "type": "bar",
                     "title": f"{value_col} by {cat_col}",
                     "categories": [str(c) for c in grouped.index],
-                    "series": [{"name": value_col, "values": [round(float(v), 2) for v in grouped.values]}],
+                    "series": [series],
                 })
 
     return {

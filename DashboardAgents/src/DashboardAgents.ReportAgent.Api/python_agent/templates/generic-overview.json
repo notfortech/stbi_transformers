@@ -1,9 +1,10 @@
 {
   "sections": [
-    { "kind": "kpi_row", "agg": ["sum", "average"], "max": 4 },
+    { "kind": "kpi_row", "agg": ["sum", "average", "share"], "max": 4 },
     { "kind": "date_kpis", "max": 1 },
+    { "kind": "period_comparison", "max": 2 },
     { "kind": "trend", "max": 3 },
-    { "kind": "breakdown", "max": 2 },
+    { "kind": "breakdown", "max": 2, "showPercent": true },
     { "kind": "category_counts", "max": 1 }
   ]
 }
